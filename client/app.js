@@ -2,7 +2,7 @@
    Until accounts are live, data (and a sample program) live on this device. */
 (() => {
 "use strict";
-const APP_VERSION = "0.2.1";
+const APP_VERSION = "0.3.0";
 const APP_NAME = "Power Plant";
 
 /* ================= Exercise library ================= */
@@ -165,7 +165,7 @@ function load() {
   S.state = normalize(lsGet("pp1.state"));
   S.workouts = lsGet("pp1.workouts") || [];
   S.days = lsGet("pp1.days") || {};
-  S.program = lsGet("pp1.program") || sampleProgram(); // replaced by the coach's program once accounts are live
+  S.program = lsGet("pp1.program") || PPSample.program(); // replaced by the coach's program once accounts are live
 }
 let saveTimer = null, storageWarned = false;
 function saveState() {
@@ -178,7 +178,7 @@ function warnStorage() { if (!storageWarned) { storageWarned = true; toast("Coul
 window.addEventListener("pagehide", () => { clearTimeout(saveTimer); lsSet("pp1.state", S.state); });
 
 /* ================= Exercises ================= */
-function meta(id) { return LIB[id] || (S.state.custom[id] ? { track: "wr", ...S.state.custom[id], id } : null); }
+function meta(id) { const px = S.program && S.program.exercises && S.program.exercises[id]; return LIB[id] || (S.state.custom[id] ? { track: "wr", ...S.state.custom[id], id } : px ? { track: "wr", sets: 3, repsMin: 5, repsMax: 5, kind: "other", muscle: "Other", ...px, id } : null); }
 function getEx(id) {
   const m = meta(id) || { id, name: id, kind: "machine", muscle: "Other", sets: 3, repsMin: 8, repsMax: 12, track: "wr" };
   const kd = KIND_DEFAULTS[S.state.units][m.kind] || KIND_DEFAULTS[S.state.units].machine;
@@ -228,7 +228,7 @@ function nextRoutineAfter(id) { const rs = S.state.routines; const i = rs.findIn
 // Normalizes logged exercises from all versions to { id, name, kind, muscle, track, repsMin, repsMax, note, sets:[{t,w,r,s,d}] }
 function wEx(e) {
   const id = e.ex || e.lift; const m = meta(id) || {};
-  const base = { id, name: e.name || m.name || id, kind: e.kind || m.kind || "machine", muscle: e.muscle || m.muscle || "Other", track: e.track || m.track || "wr", better: m.better, repsMin: e.repsMin ?? e.reps ?? 5, repsMax: e.repsMax ?? e.reps ?? 5, note: e.note || "" };
+  const base = { id, name: e.name || m.name || id, kind: e.kind || m.kind || "machine", muscle: e.muscle || m.muscle || "Other", track: e.track || m.track || "wr", fields: e.fields || null, better: m.better, repsMin: e.repsMin ?? e.reps ?? 5, repsMax: e.repsMax ?? e.reps ?? 5, note: e.note || "" };
   const sets = (e.sets || []).map((x) => (typeof x === "number" ? { t: "n", w: e.weight || 0, r: x } : x)).filter(Boolean);
   return { ...base, sets };
 }
@@ -239,6 +239,7 @@ function lastSession(exId, before) {
 }
 function setText(e, x) {
   if (!x) return "–";
+  if (e.fields) return e.fields.map((f) => f === "w" ? (x.w ? fmt(x.w) + " " + S.state.units : "") : f === "r" ? (x.r !== "" && x.r != null ? x.r + " reps" : "") : f === "s" ? (x.s ? mmss(x.s) : "") : f === "d" ? (x.d ? fmt(x.d) + " " + distUnit(e) : "") : f === "h" ? (x.h ? fmt(x.h) + " in" : "") : "").filter(Boolean).join(" · ") || "–";
   if (e.track === "time") return mmss(x.s);
   if (e.track === "dt") return `${fmt(x.d)} ${distUnit(e)} · ${mmss(x.s)}`;
   if (e.track === "wd") return `${fmt(x.w)}×${fmt(x.d)}${distUnit(e)}`;
@@ -343,7 +344,7 @@ function finishWorkout() {
     id: uid(), v: 3, date: a.startedAt, name: a.name, routine: a.routine, prog: a.prog || null, minutes, units: S.state.units, note: a.note || "",
     exercises: a.items.filter((it) => it.sets.some((x) => x.done)).map((it) => {
       const e = getEx(it.ex);
-      return { ex: it.ex, name: e.name, kind: e.kind, muscle: e.muscle, track: e.track, repsMin: e.repsMin, repsMax: e.repsMax, rx: it.rx || null, group: it.group || null, note: it.note || "", sets: it.sets.filter((x) => x.done).map(({ done, ...x }) => x) };
+      return { ex: it.ex, name: e.name, kind: e.kind, muscle: e.muscle, track: e.track, repsMin: e.repsMin, repsMax: e.repsMax, rx: it.rx || null, group: it.group || null, fields: it.fields || null, note: it.note || "", sets: it.sets.filter((x) => x.done).map(({ done, ...x }) => x) };
     }),
   };
   if (w.exercises.length) { S.workouts = [w, ...S.workouts].sort((x, y) => (x.date < y.date ? 1 : -1)); saveWorkouts(); }
@@ -373,7 +374,8 @@ function ytId(url) {
 function videoLinkFor(id) {
   const pr = S.program;
   if (pr) for (const w of pr.weeks) for (const d of w.days) for (const it of d.items) if (it.ex === id && ytId(it.video)) return it.video;
-  return GYM_VIDEOS[id] || null;
+  const px = S.program && S.program.exercises && S.program.exercises[id];
+  return (px && px.video) || GYM_VIDEOS[id] || null;
 }
 function videoFor(id) { return ytId(videoLinkFor(id)); }
 const isShort = (url) => /youtube\.com\/shorts\//.test(String(url || ""));
@@ -404,7 +406,12 @@ function sampleProgram() {
         { ex: "farmer", sets: 3, dist: 40, load: { t: "lb", v: 50 }, rest: 90, group: "C", note: "50 lb per hand." } ] },
     ] })) };
 }
-function program() { return S.program; }
+let _rawProg = null, _compiled = null;
+function program() { // the program as the client runs it, week by week
+  if (S.program !== _rawProg) { _rawProg = S.program; _compiled = S.program && S.program.v === 2 ? window.PPProgram.compile(S.program) : S.program; }
+  return _compiled;
+}
+const TRACKF = { wr: ["w", "r"], time: ["s"], dt: ["d", "s"], wd: ["w", "d"] };
 const gkey = (x) => x && (x.group || (x.rx && x.rx.group)) || null;
 function groupInfo(items, i) {
   const gid = gkey(items[i]); if (!gid) return null;
@@ -444,7 +451,23 @@ function rxLoadWeight(it) {
   const prev = lastSession(it.ex); const top = prev ? Math.max(0, ...prev.sets.filter((x) => x.t !== "w").map((x) => x.w || 0)) : 0;
   return top || e.weight;
 }
+function pctWeight(id, pct) { const e = getEx(id), m = maxFor(id); return m ? Math.max(e.kind === "barbell" ? e.barWeight : 0, roundTo((m * pct) / 100, smallStep(e.kind))) : 0; }
+function lastTopWeight(id) { const prev = lastSession(id); return prev ? Math.max(0, ...prev.sets.filter((x) => x.t !== "w").map((x) => x.w || 0)) : 0; }
+function groupWeight(id, load) {
+  if (!load) return lastTopWeight(id) || getEx(id).weight;
+  if (load.t === "lb" || load.t === "kg") return load.v;
+  if (load.t === "pct") return pctWeight(id, load.v) || lastTopWeight(id) || getEx(id).weight;
+  if (load.t === "bw") return 0;
+  return lastTopWeight(id) || getEx(id).weight;
+}
 function rxText(it, grouped) {
+  if (it.groups) {
+    const u = S.state.units, parts = it.groups.map((g) => { let t = window.PPProgram.groupText(g); if (g.load && g.load.t === "pct") { const w = pctWeight(it.ex, g.load.v); if (w) t += ` ≈ ${fmt(w)} ${u}`; } return t; });
+    if (it.tempo) parts.push(`tempo ${it.tempo}`); if (it.pause) parts.push(`pause ${it.pause}`);
+    if (it.format) parts.push(window.PPProgram.formatText(it.format));
+    if (it.rest && !grouped) parts.push(`rest ${mmss(it.rest)}`);
+    return parts.join(" · ");
+  }
   const e = getEx(it.ex), u = S.state.units, L = it.load || { t: "none" };
   let base = it.time ? `${it.sets} × ${mmss(it.time)}` : it.dist ? `${it.sets} × ${fmt(it.dist)} ${distUnit(e)}` : `${it.sets} × ${it.reps}${it.repsMax && it.repsMax !== it.reps ? "–" + it.repsMax : ""}`;
   let load = "";
@@ -454,6 +477,21 @@ function rxText(it, grouped) {
   return [base, load, it.rest && !grouped ? `rest ${mmss(it.rest)}` : ""].filter(Boolean).join(" · ");
 }
 function rxEntry(it) {
+  if (it.groups) {
+    const e = getEx(it.ex), fields = it.fields || TRACKF[e.track] || ["w", "r"], sets = [];
+    for (const g of it.groups) for (let i = 0; i < g.sets; i++) {
+      const x = { t: g.amrap ? "f" : "n", done: false };
+      if (fields.includes("w")) x.w = groupWeight(it.ex, g.load);
+      if (fields.includes("r")) x.r = g.reps || (g.amrap ? "" : g.repsMax || e.repsMax);
+      if (fields.includes("s")) x.s = g.time || 0;
+      if (fields.includes("d")) x.d = g.dist ?? 0;
+      if (fields.includes("h")) x.h = 0;
+      sets.push(x);
+    }
+    const entry = { ex: it.ex, note: "", rx: it, group: it.group || null, fields, sets };
+    if (it.warmupSets && fields.includes("w")) entry.sets.unshift(...warmupSets(entry));
+    return entry;
+  }
   const e = getEx(it.ex), w = rxLoadWeight(it), sets = [];
   for (let i = 0; i < (it.sets || 1); i++) {
     if (e.track === "time") sets.push({ t: "n", s: it.time || e.defS || 60, done: false });
@@ -465,10 +503,10 @@ function rxEntry(it) {
 }
 function startCoachDay(w, d) {
   const pr = program(); const day = pr && pr.weeks[w] && pr.weeks[w].days[d]; if (!day) return;
-  S.state.active = { routine: null, prog: { id: pr.id, w, d }, name: `Week ${w + 1} · ${day.name}`, coachNote: day.note || "", startedAt: new Date().toISOString(), note: "", restEndsAt: null, items: day.items.map(rxEntry) };
+  S.state.active = { routine: null, prog: { id: pr.id, w, d }, name: `Week ${w + 1} · ${day.name}`, coachNote: day.note || "", warmup: day.warmup || "", startedAt: new Date().toISOString(), note: "", restEndsAt: null, items: day.items.map(rxEntry) };
   S.ui.summary = null; saveState(); location.hash = "#workout"; render(); window.scrollTo(0, 0);
 }
-function missingMaxes(day) { return day.items.filter((it) => it.load && it.load.t === "pct" && !maxFor(it.ex)).map((it) => it.ex); }
+function missingMaxes(day) { return [...new Set(day.items.filter((it) => ((it.load && it.load.t === "pct") || (it.groups || []).some((g) => g.load && g.load.t === "pct")) && !maxFor(it.ex)).map((it) => it.ex))]; }
 
 /* ================= Rest timer ================= */
 let beeped = false, wake = null, audioCtx = null;
@@ -531,18 +569,23 @@ function routinePreview(r) {
 }
 
 /* ================= Train tab ================= */
-function setRowHTML(ei, si, it, e, x, prev, workIdx) {
+function setRowHTML(ei, si, it, e, x, prev, workIdx, fields) {
   const tyLabel = x.t === "n" ? workIdx : SET_LABEL[x.t];
   const miss = x.done && e.track === "wr" && x.t !== "w" && x.r < e.repsMin;
   const inp = (f, val, attrs) => `<input data-f="${f}" data-e="${ei}" data-s="${si}" value="${esc(val)}" ${attrs}>`;
   let cells = "";
-  if (e.track === "wr") cells = (e.kind === "bodyweight" ? inp("w", x.w > 0 ? fmt(x.w) : "", `inputmode="decimal" placeholder="+0" aria-label="Added weight"`) : inp("w", fmt(x.w), `inputmode="decimal" aria-label="Weight"`)) + inp("r", x.r ?? "", `inputmode="numeric" aria-label="Reps"`);
+  if (fields) cells = fields.map((f) => f === "w" ? (e.kind === "bodyweight" ? inp("w", x.w > 0 ? fmt(x.w) : "", `inputmode="decimal" placeholder="+0" aria-label="Added weight"`) : inp("w", x.w ? fmt(x.w) : "", `inputmode="decimal" aria-label="Weight"`))
+      : f === "r" ? inp("r", x.r ?? "", `inputmode="numeric" placeholder="${x.t === "f" ? "max" : ""}" aria-label="Reps"`)
+      : f === "s" ? inp("s", x.s ? mmss(x.s) : "", `inputmode="numeric" placeholder="m:ss" aria-label="Time, minutes:seconds"`)
+      : f === "d" ? inp("d", x.d ? fmt(x.d) : "", `inputmode="decimal" aria-label="Distance"`)
+      : inp("h", x.h ? fmt(x.h) : "", `inputmode="decimal" placeholder="in" aria-label="Height in inches"`)).join("");
+  else if (e.track === "wr") cells = (e.kind === "bodyweight" ? inp("w", x.w > 0 ? fmt(x.w) : "", `inputmode="decimal" placeholder="+0" aria-label="Added weight"`) : inp("w", fmt(x.w), `inputmode="decimal" aria-label="Weight"`)) + inp("r", x.r ?? "", `inputmode="numeric" aria-label="Reps"`);
   else if (e.track === "time") cells = inp("s", mmss(x.s), `inputmode="numeric" aria-label="Time, minutes:seconds"`);
   else if (e.track === "dt") cells = inp("d", fmt(x.d), `inputmode="decimal" aria-label="Distance in ${distUnit(e)}"`) + inp("s", mmss(x.s), `inputmode="numeric" aria-label="Time"`);
   else if (e.track === "wd") cells = inp("w", fmt(x.w), `inputmode="decimal" aria-label="Weight"`) + inp("d", fmt(x.d), `inputmode="decimal" aria-label="Distance in ${distUnit(e)}"`);
   return `<div class="setrow${x.done ? " done" : ""}${miss ? " miss" : ""}">
     <button class="ty ${x.t}" data-act="set-type" data-e="${ei}" data-s="${si}" aria-label="Set type: ${{ n: "working", w: "warm-up", d: "drop set", f: "to failure" }[x.t]}. Tap to change.">${tyLabel}</button>
-    <span class="prev" title="Last time">${esc(prev ? setText(e, prev) : "–")}</span>
+    <span class="prev" title="Last time">${esc(prev ? setText(fields ? { ...e, fields } : e, prev) : "–")}</span>
     ${cells}
     <button class="ck" data-act="set-done" data-e="${ei}" data-s="${si}" aria-label="${x.done ? "Mark not done" : "Mark done"}" aria-pressed="${!!x.done}">✓</button>
   </div>`;
@@ -559,7 +602,8 @@ function renderWorkout() {
       coachPanel = `<section class="panel coach-day">
         <div class="row"><div class="grow"><div class="eyebrow">From ${esc(pr.coach)} · Week ${nd.w + 1} of ${pr.weeks.length}</div><h2>${esc(day.name)}</h2></div>${pr.sample ? '<span class="pill">Sample</span>' : ""}</div>
         ${wk.note && nd.d === 0 ? `<div class="coach-note">${esc(wk.note)}</div>` : ""}
-        ${day.note ? `<div class="coach-note">${esc(day.note)}</div>` : ""}
+        ${day.date ? `<span class="pill">${day.date === todayISO() ? "Scheduled today" : "Scheduled " + dateLabel(day.date + "T12:00:00")}</span>` : ""}
+        ${day.note ? `<div class="coach-note">${esc(day.note)}</div>` : ""}${day.warmup ? `<div class="coach-note"><b>Warm-up:</b> ${esc(day.warmup)}</div>` : ""}
         <div class="rx-list">${rxListHTML(day.items, false)}</div>
         ${miss.length ? `<div class="msg action" style="align-self:stretch"><span>Some loads are a % of your max. Add your max for ${miss.map((id) => esc(getEx(id).name)).join(", ")} in <a href="#setup">Profile</a>, or pick a weight as you go.</span></div>` : ""}
         <button class="btn primary" data-act="start-day" data-w="${nd.w}" data-d="${nd.d}">Start ${esc(day.name)}</button>
@@ -586,9 +630,10 @@ function renderWorkout() {
     const e = getEx(it.ex), prev = lastSession(it.ex);
     const prevWork = prev ? prev.sets.filter((x) => x.t !== "w") : [], prevWarm = prev ? prev.sets.filter((x) => x.t === "w") : [];
     let wi = 0, wu = 0, ni = 0;
-    const rows = it.sets.map((x, si) => { const p = x.t === "w" ? prevWarm[wu++] : prevWork[ni++]; if (x.t === "n") wi++; return setRowHTML(ei, si, it, e, x, p, wi); }).join("");
-    const cols = e.track === "time" ? 1 : 2;
-    const heads = e.track === "wr" ? [e.kind === "bodyweight" ? "+" + S.state.units : S.state.units, "Reps"] : e.track === "time" ? ["Time"] : e.track === "dt" ? [distUnit(e), "Time"] : [S.state.units, distUnit(e)];
+    const rows = it.sets.map((x, si) => { const p = x.t === "w" ? prevWarm[wu++] : prevWork[ni++]; if (x.t === "n") wi++; return setRowHTML(ei, si, it, e, x, p, wi, it.fields); }).join("");
+    const du = it.rx && it.rx.groups && it.rx.groups[0] && it.rx.groups[0].distUnit;
+    const cols = it.fields ? it.fields.length : e.track === "time" ? 1 : 2;
+    const heads = it.fields ? it.fields.map((f) => ({ w: e.kind === "bodyweight" ? "+" + S.state.units : S.state.units, r: "Reps", s: "Time", d: du || distUnit(e), h: "Height" }[f])) : e.track === "wr" ? [e.kind === "bodyweight" ? "+" + S.state.units : S.state.units, "Reps"] : e.track === "time" ? ["Time"] : e.track === "dt" ? [distUnit(e), "Time"] : [S.state.units, distUnit(e)];
     const topW = Math.max(0, ...it.sets.filter((x) => x.t === "n").map((x) => x.w || 0));
     const confirmRemove = S.ui.confirm === "rm:" + ei;
     const noteOpen = S.ui.note === ei || it.note;
@@ -613,7 +658,7 @@ function renderWorkout() {
     ? `<div class="panel"><b>Finish with unchecked sets?</b><span class="sub">Unchecked working sets on exercises you started count as missed. Exercises with no checked sets are skipped.</span><div class="row end"><button class="btn ghost" data-act="confirm-no">Back</button><button class="btn primary" data-act="finish-yes">Finish</button></div></div>`
     : "";
   return `${header(`In progress · <span id="elapsed" class="num">${mmss((Date.now() - Date.parse(a.startedAt)) / 1000)}</span>`, esc(a.name))}
-    ${a.coachNote ? `<div class="coach-note">${esc(a.coachNote)}</div>` : ""}
+    ${a.coachNote ? `<div class="coach-note">${esc(a.coachNote)}</div>` : ""}${a.warmup ? `<div class="coach-note"><b>Warm-up:</b> ${esc(a.warmup)}</div>` : ""}
     ${blocks || `<div class="empty">No exercises yet. Add your first one below.</div>`}
     <button class="btn wide" data-act="add-ex" data-target="active">+ Add exercise</button>
     <textarea class="ex-note" data-wnote="1" rows="2" placeholder="${a.prog ? "Note for your coach: how it felt, anything that hurt, questions…" : "Workout note: sleep, energy, anything worth remembering…"}" aria-label="Workout note">${esc(a.note)}</textarea>
@@ -654,7 +699,7 @@ function renderProgram() {
     ${wk.days.map((day, d) => {
       const k = dayKey(w, d), isNext = nd && nd.w === w && nd.d === d, open = S.ui.openDay === k;
       const status = done[k] ? `<span class="pill good">Done ${dateLabel(done[k]).replace(/^\w+, /, "")}</span>` : isNext ? `<span class="pill good">Next</span>` : "";
-      return `<div class="pday"><button class="pday-hd" data-act="open-day" data-k="${k}" aria-expanded="${open}"><b class="grow">${esc(day.name)}</b>${status}<span class="sub">${day.items.length} exercises</span><span class="sub" aria-hidden="true">${open ? "▴" : "▾"}</span></button>
+      return `<div class="pday"><button class="pday-hd" data-act="open-day" data-k="${k}" aria-expanded="${open}"><b class="grow">${day.date ? `<span class="sub">${dateLabel(day.date + "T12:00:00").replace(/,.*$/, "")} · </span>` : ""}${esc(day.name)}</b>${status}<span class="sub">${day.items.length} exercises</span><span class="sub" aria-hidden="true">${open ? "▴" : "▾"}</span></button>
         ${open ? `<div class="pday-body">${day.note ? `<div class="coach-note">${esc(day.note)}</div>` : ""}<div class="rx-list">${rxListHTML(day.items, true)}</div>
           ${S.state.active ? `<span class="note">Finish your current workout before starting another.</span>` : `<button class="btn ${done[k] ? "" : "primary"}" data-act="start-day" data-w="${w}" data-d="${d}">${done[k] ? "Do it again" : "Start this workout"}</button>`}</div>` : ""}
       </div>`;
@@ -931,8 +976,10 @@ window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); inst
 function renderSetup() {
   const st = S.state, u = st.units;
   const standalone = matchMedia("(display-mode: standalone)").matches;
-  const pr = program(); const pctIds = pr ? [...new Set(pr.weeks.flatMap((w) => w.days.flatMap((d) => d.items.filter((it) => it.load && it.load.t === "pct").map((it) => it.ex))))] : [];
+  const pr = program(); const pctIds = pr ? [...new Set(pr.weeks.flatMap((w) => w.days.flatMap((d) => d.items.filter((it) => (it.load && it.load.t === "pct") || (it.groups || []).some((g) => g.load && g.load.t === "pct")).map((it) => it.ex))))] : [];
   return `${header(`${APP_NAME} · version ${APP_VERSION}`, "Profile")}
+    <section class="panel"><h2>Coach program</h2><span class="sub">${S.program && S.program.sample ? "You’re using the sample program." : `Using “${esc((program() || {}).name || "")}”.`} Until accounts are live, your coach can send a program file to load here.</span>
+      <div class="row"><label class="btn small" for="progfile" role="button" tabindex="0">Load a program file</label><input type="file" id="progfile" accept=".json,application/json" hidden>${S.program && !S.program.sample ? `<button class="btn small ghost" data-act="prog-sample">Go back to the sample</button>` : ""}</div></section>
     <section class="panel"><h2>Account</h2><span class="sub">Accounts aren’t live yet. For now everything is saved on this phone, and the program shown is a sample. When your coach invites you, you’ll sign in here and your real program and history will sync.</span></section>
     ${pctIds.length ? `<section class="panel"><h2>Your maxes (${u})</h2><span class="sub">Your best single rep. Your coach uses these to work out percentage-based weights. Leave blank to use your best estimated max from your logged workouts.</span>
       ${pctIds.map((id) => `<div class="field"><label for="max-${id}">${esc(getEx(id).name)}</label><input id="max-${id}" type="text" inputmode="decimal" value="${st.maxes[id] ? fmt(st.maxes[id]) : ""}" placeholder="${maxFor(id) ? "~" + fmt(maxFor(id)) : "–"}" data-max="${id}"></div>`).join("")}</section>` : ""}
@@ -991,13 +1038,14 @@ document.addEventListener("click", async (ev) => {
     case "start": startWorkout(b.dataset.r); break;
     case "start-free": startWorkout(null); break;
     case "start-day": startCoachDay(+b.dataset.w, +b.dataset.d); break;
+    case "prog-sample": S.program = PPSample.program(); try { localStorage.removeItem("pp1.program"); } catch {} toast("Back to the sample program."); render(); break;
     case "open-day": S.ui.openDay = S.ui.openDay === b.dataset.k ? null : b.dataset.k; render(); break;
     case "set-done": {
       const it = a.items[+b.dataset.e], x = it.sets[+b.dataset.s], e = getEx(it.ex);
       x.done = !x.done;
       const g = groupInfo(a.items, +b.dataset.e);
       if (x.done && g && !g.last && x.t !== "w") { a.restEndsAt = null; toast(`No rest. Next: ${g.letter}${g.idx + 1} ${getEx(a.items[g.start + g.idx].ex).name}`); }
-      else if (x.done) startRest(x.t === "w" ? "warm" : !it.rx && e.track === "wr" && x.r < e.repsMin ? "fail" : "ok", e, g ? groupRest(a.items, g) : it.rx && it.rx.rest);
+      else if (x.done) { const fm = it.rx && it.rx.format; startRest(x.t === "w" ? "warm" : !it.rx && e.track === "wr" && x.r < e.repsMin ? "fail" : "ok", e, fm ? (fm.t === "emom" ? fm.every : fm.rest) : g ? groupRest(a.items, g) : it.rx && it.rx.rest); }
       else a.restEndsAt = null;
       saveState(); render(); break;
     }
@@ -1096,6 +1144,15 @@ document.addEventListener("change", (ev) => {
     const files = [...(t.files || [])]; if (!files.length) return;
     importFood(files).then((r) => { toast(r.foodDays || r.weightDays ? `Imported ${r.foodDays} day${r.foodDays === 1 ? "" : "s"} of food${r.weightDays ? ` and ${r.weightDays} weigh-ins` : ""}.` : "No food or weight rows found in that file."); render(); })
       .catch((e) => toast((e && e.message) || "That file couldn’t be read."));
+    return;
+  }
+  if (t.id === "progfile") {
+    const f = t.files && t.files[0]; if (!f) return;
+    f.text().then((txt) => {
+      const pr = JSON.parse(txt);
+      if (!pr || !pr.days || !pr.weeks || !window.PPProgram.compile(pr).weeks.length) throw new Error("bad");
+      pr.sample = false; S.program = pr; lsSet("pp1.program", pr); toast(`Loaded “${pr.name}”.`); location.hash = "#program"; render();
+    }).catch(() => toast("That file isn’t a Power Plant program."));
     return;
   }
   if (t.id === "restore") {

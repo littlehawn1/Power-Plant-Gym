@@ -1,6 +1,8 @@
 # Publishes the site to GitHub Pages on every push to main:
-#   /app/    the client app (from client/)
+#   /app/    the client app (client/)
+#   /coach/  the coach dashboard (coach/)
 #   /        a small page that sends visitors to /app/
+# See build.sh.
 name: Deploy to GitHub Pages
 on:
   push:
@@ -21,12 +23,8 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      - name: Collect site files
-        run: |
-          mkdir -p _site/app
-          cp -r client/index.html client/styles.css client/app.js client/exercises.js client/sw.js client/manifest.webmanifest client/icons _site/app/
-          if [ -d client/videos ]; then cp -r client/videos _site/app/; fi
-          printf '<!doctype html><meta charset="utf-8"><title>Power Plant</title><meta http-equiv="refresh" content="0; url=app/"><a href="app/">Open the Power Plant app</a>\n' > _site/index.html
+      - name: Build the site
+        run: sh build.sh
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

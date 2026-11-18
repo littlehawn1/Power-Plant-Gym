@@ -1,0 +1,83 @@
+/* Power Plant exercise library, shared by the coach dashboard and the client app.
+   [id, name, kind, muscle, sets, repsMin, repsMax, extra]  — extra.track: "wr" weight×reps (default), "time", "dt" distance+time, "wd" weight+distance */
+(function (root) {
+  "use strict";
+  const LIB_ROWS = [
+    ["squat", "Barbell Back Squat", "barbell", "Legs", 3, 5, 5],
+    ["front_squat", "Front Squat", "barbell", "Legs", 3, 5, 8],
+    ["deadlift", "Deadlift", "barbell", "Back", 1, 5, 5],
+    ["trap_dl", "Trap Bar Deadlift", "barbell", "Back", 3, 3, 5, { barW: true }],
+    ["rdl", "Romanian Deadlift", "barbell", "Hamstrings", 3, 8, 10],
+    ["hip_thrust", "Barbell Hip Thrust", "barbell", "Glutes", 3, 8, 12],
+    ["leg_press", "Leg Press", "machine", "Legs", 3, 10, 12],
+    ["hack_squat", "Hack Squat", "machine", "Legs", 3, 8, 12],
+    ["leg_ext", "Leg Extension", "machine", "Quads", 3, 10, 15],
+    ["leg_curl", "Lying Leg Curl", "machine", "Hamstrings", 3, 10, 12],
+    ["seated_leg_curl", "Seated Leg Curl", "machine", "Hamstrings", 3, 10, 12],
+    ["goblet", "Goblet Squat", "dumbbell", "Legs", 3, 10, 12],
+    ["bulgarian", "Bulgarian Split Squat", "dumbbell", "Legs", 3, 8, 12],
+    ["lunge", "Walking Lunge", "dumbbell", "Legs", 3, 10, 12],
+    ["hip_abd", "Hip Abduction", "machine", "Glutes", 3, 12, 15],
+    ["calf_raise", "Standing Calf Raise", "machine", "Calves", 4, 10, 15],
+    ["seated_calf", "Seated Calf Raise", "machine", "Calves", 3, 12, 15],
+    ["bench", "Barbell Bench Press", "barbell", "Chest", 3, 5, 5],
+    ["incline_bench", "Incline Barbell Bench", "barbell", "Chest", 3, 6, 10],
+    ["db_bench", "Dumbbell Bench Press", "dumbbell", "Chest", 3, 8, 12],
+    ["incline_db", "Incline Dumbbell Press", "dumbbell", "Chest", 3, 8, 12],
+    ["chest_press", "Machine Chest Press", "machine", "Chest", 3, 8, 12],
+    ["pec_deck", "Pec Deck Fly", "machine", "Chest", 3, 12, 15],
+    ["cable_fly", "Cable Fly", "cable", "Chest", 3, 12, 15],
+    ["dip", "Dip", "bodyweight", "Chest", 3, 6, 12],
+    ["pushup", "Push-up", "bodyweight", "Chest", 3, 10, 20],
+    ["hrpu", "Hand-Release Push-up", "bodyweight", "Chest", 1, 20, 60],
+    ["row", "Barbell Row", "barbell", "Back", 3, 5, 8],
+    ["pullup", "Pull-up", "bodyweight", "Back", 3, 5, 10],
+    ["chinup", "Chin-up", "bodyweight", "Back", 3, 5, 10],
+    ["lat_pulldown", "Lat Pulldown", "cable", "Back", 3, 8, 12],
+    ["seated_row", "Seated Cable Row", "cable", "Back", 3, 8, 12],
+    ["db_row", "One-Arm Dumbbell Row", "dumbbell", "Back", 3, 8, 12],
+    ["tbar_row", "T-Bar Row", "machine", "Back", 3, 8, 12],
+    ["machine_row", "Chest-Supported Machine Row", "machine", "Back", 3, 8, 12],
+    ["straight_arm", "Straight-Arm Pulldown", "cable", "Back", 3, 12, 15],
+    ["back_ext", "Back Extension", "bodyweight", "Lower back", 3, 10, 15],
+    ["ohp", "Overhead Press", "barbell", "Shoulders", 3, 5, 5],
+    ["db_shoulder", "Seated Dumbbell Shoulder Press", "dumbbell", "Shoulders", 3, 8, 12],
+    ["machine_shoulder", "Machine Shoulder Press", "machine", "Shoulders", 3, 8, 12],
+    ["lateral", "Dumbbell Lateral Raise", "dumbbell", "Shoulders", 3, 12, 15],
+    ["cable_lateral", "Cable Lateral Raise", "cable", "Shoulders", 3, 12, 15],
+    ["rear_delt", "Reverse Pec Deck", "machine", "Rear delts", 3, 12, 15],
+    ["face_pull", "Face Pull", "cable", "Rear delts", 3, 12, 15],
+    ["shrug", "Dumbbell Shrug", "dumbbell", "Traps", 3, 10, 15],
+    ["bb_curl", "Barbell Curl", "barbell", "Biceps", 3, 8, 12],
+    ["db_curl", "Dumbbell Curl", "dumbbell", "Biceps", 3, 8, 12],
+    ["hammer", "Hammer Curl", "dumbbell", "Biceps", 3, 10, 12],
+    ["cable_curl", "Cable Curl", "cable", "Biceps", 3, 10, 15],
+    ["preacher", "Machine Preacher Curl", "machine", "Biceps", 3, 10, 12],
+    ["pushdown", "Triceps Pushdown", "cable", "Triceps", 3, 10, 15],
+    ["oh_ext", "Overhead Cable Triceps Extension", "cable", "Triceps", 3, 10, 15],
+    ["skull", "EZ-Bar Skull Crusher", "barbell", "Triceps", 3, 8, 12],
+    ["close_bench", "Close-Grip Bench Press", "barbell", "Triceps", 3, 6, 10],
+    ["hang_leg", "Hanging Leg Raise", "bodyweight", "Core", 3, 10, 15],
+    ["cable_crunch", "Cable Crunch", "cable", "Core", 3, 12, 15],
+    ["ab_wheel", "Ab Wheel Rollout", "bodyweight", "Core", 3, 8, 12],
+    ["plank", "Plank", "bodyweight", "Core", 3, 0, 0, { track: "time", better: "higher", defS: 60 }],
+    ["dead_hang", "Dead Hang", "bodyweight", "Grip", 3, 0, 0, { track: "time", better: "higher", defS: 45 }],
+    ["farmer", "Farmer Carry", "dumbbell", "Grip", 3, 0, 0, { track: "wd", dist: "short", defD: 40 }],
+    ["sled_push", "Sled Push", "machine", "Legs", 4, 0, 0, { track: "wd", dist: "short", defD: 25 }],
+    ["sdc", "Sprint-Drag-Carry", "cardio", "Conditioning", 1, 0, 0, { track: "time", better: "lower", defS: 150 }],
+    ["run2mi", "2-Mile Run", "cardio", "Conditioning", 1, 0, 0, { track: "time", better: "lower", defS: 1080 }],
+    ["run", "Run", "cardio", "Conditioning", 1, 0, 0, { track: "dt", dist: "long", defD: 2, defS: 1080 }],
+    ["sprints", "Sprint Intervals", "cardio", "Conditioning", 6, 0, 0, { track: "dt", dist: "short", defD: 100, defS: 18 }],
+    ["row_erg", "Rowing Machine", "cardio", "Conditioning", 1, 0, 0, { track: "dt", dist: "short", defD: 2000, defS: 480 }],
+    ["bike", "Stationary Bike", "cardio", "Conditioning", 1, 0, 0, { track: "dt", dist: "long", defD: 5, defS: 900 }],
+    ["stairs", "Stair Climber", "cardio", "Conditioning", 1, 0, 0, { track: "time", better: "higher", defS: 900 }],
+  ];
+  const KINDS = ["barbell", "dumbbell", "machine", "cable", "bodyweight", "cardio"];
+  const MUSCLES = ["Chest", "Back", "Shoulders", "Rear delts", "Traps", "Legs", "Quads", "Hamstrings", "Glutes", "Calves", "Lower back", "Biceps", "Triceps", "Core", "Grip", "Conditioning", "Other"];
+  // What a client records for each kind of exercise unless the coach chooses otherwise.
+  const TRACK_FIELDS = { wr: ["w", "r"], time: ["s"], dt: ["d", "s"], wd: ["w", "d"] };
+  const FIELD_NAMES = { w: "Weight", r: "Reps", s: "Time", d: "Distance", h: "Height" };
+  const api = { LIB_ROWS, KINDS, MUSCLES, TRACK_FIELDS, FIELD_NAMES };
+  if (typeof module !== "undefined" && module.exports) module.exports = api;
+  root.PPLibrary = api;
+})(typeof window !== "undefined" ? window : globalThis);

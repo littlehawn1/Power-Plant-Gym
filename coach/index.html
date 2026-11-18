@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Power Plant Coach</title>
+<meta name="theme-color" content="#f07521">
+<link rel="icon" href="../app/icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="coach.css">
+</head>
+<body>
+<header class="top"><div class="top-in">
+  <a class="brand" href="#clients">Power Plant <span>Coach</span></a>
+  <nav><a href="#clients" data-nav="clients">Clients</a></nav>
+  <span class="grow"></span>
+  <span class="pill sample" id="sample-pill" hidden>Sample data</span>
+  <label class="coach-pick">Signed in as <select id="me" aria-label="Coach"></select></label>
+</div></header>
+<main id="view" aria-live="polite"></main>
+<div id="modal"></div>
+<div class="toast" id="toast" hidden></div>
+<script src="library.js"></script>
+<script src="program.js"></script>
+<script src="sample.js"></script>
+<script src="coach.js"></script>
+</body>
+</html>
