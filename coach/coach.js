@@ -10,7 +10,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const uid = (p) => p + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 const clone = (o) => JSON.parse(JSON.stringify(o));
 const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
-const dateLabel = (iso) => new Date(iso.length === 10 ? iso + "T12:00:00" : iso).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+const dateLabel = (iso) => !iso ? "" : new Date(iso.length === 10 ? iso + "T12:00:00" : iso).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 const mmss = (s) => P.mmss(s);
 const parseTime = (v) => { const s = String(v || "").trim(); if (!s) return 0; if (s.includes(":")) return s.split(":").reduce((a, b) => a * 60 + (+b || 0), 0); return Math.round(+s.replace(/[^0-9.]/g, "") || 0); };
 let toastT = null;
@@ -346,6 +346,12 @@ function logFlags(l) {
   return f;
 }
 function logCardHTML(l, showClient) {
+  try { return logCardInner(l, showClient); } catch (e) {
+    console.error("Couldn't show workout", l && l.id, e);
+    return `<article class="panel wcard"><div class="hd"><b>${esc((l && l.name) || "Workout")}</b><span class="sub">${l && l.date ? dateLabel(l.date) : ""}</span></div><div class="sub">This workout couldn’t be shown in full.</div></article>`;
+  }
+}
+function logCardInner(l, showClient) {
   const f = logFlags(l), c = client(l.clientId);
   return `<article class="panel wcard${f.pain.length ? " has-pain" : ""}"><div class="hd"><b>${showClient && c ? `<a href="#client-${c.id}">${esc(c.name)}</a> · ` : ""}${esc(l.name)}</b><span class="sub">${dateLabel(l.date)}${l.minutes ? ` · ${l.minutes} min` : ""}${l.volume ? ` · ${l.volume.toLocaleString()} lb lifted` : ""}</span></div>
     ${f.any ? `<div class="flags">${f.pr.map((x) => `<span class="flag pr">PR · ${esc(x)}</span>`).join("")}${f.missed.map((x) => `<span class="flag miss">Missed · ${esc(x)}</span>`).join("")}${f.pain.map((x) => `<span class="flag pain">Pain · ${esc(x)}</span>`).join("")}</div>` : ""}

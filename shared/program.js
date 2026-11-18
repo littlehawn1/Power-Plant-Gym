@@ -117,8 +117,9 @@
     return (l ? `${t} @ ${l}` : t) + (g.label ? ` (${g.label})` : "");
   }
   function prescriptionText(p, units) {
+    if (!p || typeof p !== "object") return typeof p === "string" ? p : "";
     if (p.text) return p.text; // the coach's own words
-    const parts = p.groups.map((g) => groupText(g, units));
+    const parts = (Array.isArray(p.groups) ? p.groups : []).filter(Boolean).map((g) => groupText(g, units));
     if (p.tempo) parts.push(`tempo ${p.tempo}`);
     if (p.pause) parts.push(`pause ${p.pause}`);
     return parts.join(" · ");
