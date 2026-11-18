@@ -11,7 +11,20 @@
 import Anthropic from "@anthropic-ai/sdk";
 
 const MODEL = "claude-opus-5-5";
-const MAX_HISTORY_MESSAGES = 120;
+const MAX_HISTORY_MESSAGES = 300;
+const KEEP_PHOTOS_IN_LAST = 12; // older photos/files are swapped for a placeholder to keep requests small
+
+const isToolResult = (m) => m.role === "user" && Array.isArray(m.content) && m.content.some((b) => b.type === "tool_result");
+/* The slice of history sent to Claude. It must start with a plain user message: starting on an
+   assistant turn or on a tool result whose tool call was cut off makes the API reject the request. */
+function window_(history) {
+  let start = Math.max(0, history.length - MAX_HISTORY_MESSAGES);
+  while (start < history.length && (history[start].role !== "user" || isToolResult(history[start]))) start++;
+  return history.slice(start).map((m, i, all) => {
+    if (i >= all.length - KEEP_PHOTOS_IN_LAST || m.role !== "user" || !Array.isArray(m.content)) return m;
+    return { ...m, content: m.content.map((b) => (b.type === "image" || b.type === "document") ? { type: "text", text: "[a photo or file she sent earlier; what it showed is in your notes]" } : b) };
+  });
+}
 
 const SYSTEM = `You are the setup interviewer for Power Plant Gym's new coaching software. You're chatting on Telegram with Jess, a strength and strongman coach at Power Plant Gym in Aston, PA. Someone in her family is building two things for the gym with help from Claude, and you're gathering what they need to get it right:
 - a client app (clients see their coach's program, log workouts, see the gym's demo videos), already working in a first version
@@ -127,6 +140,7 @@ async function converse(env, chatId, userContent) {
   const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
   const key = `chat:${chatId}`;
   const state = await getJSON(env, key, { history: [] });
+  const before = state.history.length;
   state.history.push({ role: "user", content: userContent });
   let reply = "";
   for (let round = 0; round < 4; round++) {
@@ -140,15 +154,16 @@ async function converse(env, chatId, userContent) {
         fallbacks: "default",
         system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }],
         tools: TOOLS,
-        messages: state.history.slice(-MAX_HISTORY_MESSAGES),
+        messages: window_(state.history),
       });
     } catch (e) {
       if (e instanceof Anthropic.RateLimitError) return "I'm getting a lot of messages right now. Give me a minute and send that again?";
       if (e instanceof Anthropic.AuthenticationError) return "I can't reach my brain right now (the Claude key isn't working). I'll let the app's builder know.";
+      console.error("Claude API error", e.status, e.message);
       if (e instanceof Anthropic.APIError) return "Something went wrong on my end. Could you send that again in a minute?";
       throw e;
     }
-    if (res.stop_reason === "refusal") { state.history.pop(); await putJSON(env, key, state); return "Sorry, I can't help with that one. Could you put it another way?"; }
+    if (res.stop_reason === "refusal") { state.history.length = before; await putJSON(env, key, state); return "Sorry, I can't help with that one. Could you put it another way?"; }
     state.history.push({ role: "assistant", content: res.content }); // append the full response, unchanged
     const said = res.content.filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
     if (said) reply += (reply ? "\n\n" : "") + said;
