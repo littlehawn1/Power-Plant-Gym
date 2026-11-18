@@ -139,7 +139,7 @@ async function refreshCloud() {
   if (!db || !db.cloud || saveT || pushing || pushFailed || Date.now() - loadedAt < 30000) return;
   if ($("#modal").innerHTML || UI.confirm || /^#program-/.test(location.hash)) return;
   const a = document.activeElement; if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.id !== "me") return;
-  try { const d = await loadCloud(); if (saveT || pushing) return; db = d; snap = hashRows(rowsOf(db)); loadedAt = Date.now(); renderTop(); route(); } catch {}
+  try { const d = await loadCloud(); if (saveT || pushing) return; db = d; snap = hashRows(rowsOf(db)); loadedAt = Date.now(); renderTop(); route(); loadMessages().catch(() => {}); } catch {}
 }
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") refreshCloud(); });
 window.addEventListener("focus", refreshCloud);
@@ -156,8 +156,89 @@ async function boot() {
   }
   snap = hashRows(rowsOf(db)); loadedAt = Date.now();
   renderTop(); route();
+  loadMessages().catch(() => {}); subscribeMessages();
 }
 const appLink = () => new URL("../app/", location.href).href;
+
+/* ================= Messages ================= */
+// One conversation per client; any coach can answer. Kept out of `db` (it isn't edited, only added to), loaded on
+// sign-in and kept live. A client's message counts as unread until any coach opens that conversation.
+const PM = window.PPMessages;
+const MS = { list: [], ch: null, drafts: {}, loom: {}, sending: false, err: "" };
+const convOf = (cid) => MS.list.filter((m) => m.client_id === cid);
+const unreadOf = (cid) => MS.list.filter((m) => m.client_id === cid && m.sender_id === cid && !m.read_at).length;
+function msgBadge() { const el = $("#msg-badge"); if (!el || !db || !db.cloud) return; const n = MS.list.filter((m) => m.sender_id === m.client_id && !m.read_at).length; el.textContent = n > 99 ? "99+" : String(n); el.hidden = !n; }
+async function loadMessages() {
+  if (!db || !db.cloud) return;
+  const r = await Cloud.client().from("messages").select(PM.COLS).order("created_at", { ascending: true }).limit(5000);
+  if (r.error) return;
+  const changed = Cloud.hash(r.data) !== Cloud.hash(MS.list);
+  MS.list = r.data; msgBadge();
+  if (!changed) return;
+  const h = location.hash;
+  if (h === "#messages") route();
+  else if (/^#client-/.test(h) && UI.clientTab === "messages") refreshConv();
+  else if (h === "#feed" || /^#client-/.test(h)) { const a = document.activeElement; if (!(a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))) route(); }
+}
+function subscribeMessages() {
+  const c = Cloud.client(); if (!c.channel || MS.ch) return;
+  MS.ch = c.channel("coach-msgs").on("postgres_changes", { event: "*", schema: "public", table: "messages" }, () => loadMessages()).subscribe();
+}
+async function markRead(cid) {
+  if (!unreadOf(cid) || document.visibilityState !== "visible") return;
+  const now = new Date().toISOString();
+  const { error } = await Cloud.client().from("messages").update({ read_at: now }).eq("client_id", cid).eq("sender_id", cid).is("read_at", null);
+  if (!error) { for (const m of MS.list) if (m.client_id === cid && m.sender_id === cid && !m.read_at) m.read_at = now; msgBadge(); }
+}
+function msgTag(m) {
+  const l = m.workout_id && db.logs.find((x) => x.id === m.workout_id);
+  return m.ex || l ? `Form check${m.ex ? " · " + esc(exMeta(m.ex).name) : ""}${l ? " · " + esc(dateLabel(l.date)) + " " + esc(l.name || "") : ""}` : "";
+}
+function convListHTML(cid) {
+  const list = convOf(cid), c = client(cid);
+  if (!list.length) return `<div class="pm-empty">No messages with ${esc(c ? c.name : "this client")} yet.</div>`;
+  return list.map((m) => {
+    const mine = m.sender_id === meUser.id, coach = db.coaches.find((x) => x.id === m.sender_id);
+    return PM.bubble(m, { mine, who: mine ? "You" : coach ? coach.name : c ? c.name : "Client", tag: msgTag(m) });
+  }).join("");
+}
+function conversationHTML(cid) {
+  PM.css();
+  const c = client(cid);
+  return `<section class="panel"><div class="pm-list" id="conv">${convListHTML(cid)}</div></section>
+    <section class="panel conv-compose"><h2>Reply</h2>
+      <textarea class="in" id="cm-body" data-c="${cid}" rows="3" placeholder="Write to ${esc(c ? c.name : "the client")}. Every coach can see this conversation.">${esc(MS.drafts[cid] || "")}</textarea>
+      <label class="f">Loom video link (optional)<input class="in" id="cm-loom" data-c="${cid}" inputmode="url" placeholder="https://www.loom.com/share/…" value="${esc(MS.loom[cid] || "")}"></label>
+      <div id="cm-err">${MS.err ? `<span class="sub" role="alert" style="color:var(--bad)">${esc(MS.err)}</span>` : ""}</div>
+      <div class="row"><button class="btn primary" data-act="cm-send" data-c="${cid}" ${MS.sending ? "disabled" : ""}>${MS.sending ? "Sending…" : "Send"}</button></div></section>`;
+}
+function refreshConv() { const el = $("#conv"); const cid = (location.hash.match(/^#client-(.+)$/) || [])[1]; if (!el || !cid) return; el.innerHTML = convListHTML(cid); PM.hydrate(el); el.lastElementChild?.scrollIntoView({ block: "nearest" }); markRead(cid); }
+function renderInbox() {
+  setNav("messages"); PM.css();
+  const byClient = new Map();
+  for (const m of MS.list) byClient.set(m.client_id, m); // the list is oldest first, so this keeps the latest
+  const rows = [...byClient.entries()].sort((a, b) => (a[1].created_at < b[1].created_at ? 1 : -1)).map(([cid, m]) => {
+    const c = client(cid), n = unreadOf(cid), fromClient = m.sender_id === cid;
+    const snip = m.body || (m.video_path ? "🎥 Form-check video" : m.loom_url ? "🎥 Loom video" : "");
+    return `<a class="panel${n ? " unread" : ""}" href="#client-${cid}" data-act="open-conv" data-c="${cid}"><b>${esc(c ? c.name : "Former client")}</b>${n ? `<span class="nbadge">${n}</span>` : ""}
+      <span class="snip">${fromClient ? "" : "Coach: "}${esc(snip)}</span><span class="sub">${esc(PM.when(m.created_at))}</span></a>`;
+  }).join("");
+  $("#view").innerHTML = `<div class="row"><div class="grow"><div class="eyebrow">Every client’s conversation, newest first · any coach can answer</div><h1>Messages</h1></div></div>
+    <div class="inbox">${rows || `<div class="empty">No messages yet. When a client sends a message or a form-check video from the app, it shows up here.</div>`}</div>`;
+}
+async function sendCoachMessage(cid) {
+  if (MS.sending) return;
+  const body = ($("#cm-body")?.value || "").trim(), loomRaw = ($("#cm-loom")?.value || "").trim(), loom = PM.cleanLink(loomRaw);
+  const errEl = () => $("#cm-err"), show = (t) => { MS.err = t; const e = errEl(); if (e) e.innerHTML = t ? `<span class="sub" role="alert" style="color:var(--bad)">${esc(t)}</span>` : ""; };
+  if (!body && !loomRaw) return show("Write a reply or paste a Loom link first.");
+  if (loomRaw && !loom) return show("That Loom link doesn’t look like a web address. Copy it from Loom’s Share button.");
+  MS.sending = true; show(""); const btn = $("[data-act='cm-send']"); if (btn) { btn.disabled = true; btn.textContent = "Sending…"; }
+  const { error } = await Cloud.client().from("messages").insert({ client_id: cid, sender_id: meUser.id, body, loom_url: loom || null });
+  MS.sending = false;
+  if (error) { if (btn) { btn.disabled = false; btn.textContent = "Send"; } return show("Couldn’t send: " + Cloud.friendly(error)); }
+  MS.drafts[cid] = ""; MS.loom[cid] = ""; MS.err = "";
+  await loadMessages(); route();
+}
 function seed() {
   const d = { v: 2, sample: true, me: "c1", coaches: [{ id: "c1", name: "You" }, { id: "c2", name: "Second coach (sample)" }], clients: [], programs: [], logs: [], custom: {}, dayNotes: {} };
   d.clients = [
@@ -201,6 +282,7 @@ function route() {
   if ((m = h.match(/^program-(.+)$/)) && db.programs.find((p) => p.id === m[1])) return renderProgram(m[1]);
   if ((m = h.match(/^client-(.+)$/)) && client(m[1])) return renderClient(m[1]);
   if (h === "feed") return renderFeed();
+  if (h === "messages" && db.cloud) return renderInbox();
   if (h === "templates") return renderTemplates();
   return renderClients();
 }
@@ -211,6 +293,8 @@ function renderTop() {
     if (!$("#signout")) $("#me").closest("label").insertAdjacentHTML("afterend", `<button class="btn small ghost" id="signout" data-act="signout">Sign out</button>`);
   } else $("#me").innerHTML = db.coaches.map((c) => `<option value="${c.id}" ${c.id === db.me ? "selected" : ""}>${esc(c.name)}</option>`).join("");
   $("#sample-pill").hidden = !db.sample;
+  const ml = document.querySelector('[data-nav="messages"]'); if (ml) ml.hidden = !db.cloud;
+  msgBadge();
 }
 
 function renderClients() {
@@ -266,6 +350,7 @@ function logCardHTML(l, showClient) {
   return `<article class="panel wcard${f.pain.length ? " has-pain" : ""}"><div class="hd"><b>${showClient && c ? `<a href="#client-${c.id}">${esc(c.name)}</a> · ` : ""}${esc(l.name)}</b><span class="sub">${dateLabel(l.date)}${l.minutes ? ` · ${l.minutes} min` : ""}${l.volume ? ` · ${l.volume.toLocaleString()} lb lifted` : ""}</span></div>
     ${f.any ? `<div class="flags">${f.pr.map((x) => `<span class="flag pr">PR · ${esc(x)}</span>`).join("")}${f.missed.map((x) => `<span class="flag miss">Missed · ${esc(x)}</span>`).join("")}${f.pain.map((x) => `<span class="flag pain">Pain · ${esc(x)}</span>`).join("")}</div>` : ""}
     ${l.note ? `<div class="cnote">“${esc(l.note)}”</div>` : ""}
+    ${(() => { const fc = MS.list.filter((m) => m.workout_id === l.id && m.video_path); return fc.length ? `<a class="fcl" href="#client-${l.clientId}" data-act="open-conv" data-c="${l.clientId}">🎥 ${fc.length === 1 ? "Form-check video" : fc.length + " form-check videos"}${fc[0].ex ? ` · ${esc(exMeta(fc[0].ex).name)}` : ""}: open in messages</a>` : ""; })()}
     ${(l.exercises || []).map((e) => `<div class="wex"><span><b>${esc(exMeta(e.ex).name)}</b><br><span class="rx">${esc(rxStr(e))}</span></span><span class="num">${esc(setsText(e))}${e.note ? `<div class="cnote" style="margin-top:6px">“${esc(e.note)}”</div>` : ""}</span></div>`).join("")}
   </article>`;
 }
@@ -346,8 +431,8 @@ function renderClient(cid) {
           <select class="in" id="c-remote" data-c="${cid}" aria-label="Training"><option value="0">In person</option><option value="1" ${c.remote ? "selected" : ""}>Remote</option></select><span class="sub">${esc(c.email || "")}</span></div>`
       : `<div class="eyebrow">${c.remote ? "Remote" : "In person"} · Main coach: ${esc((db.coaches.find((x) => x.id === c.coachId) || {}).name || "–")}</div>`}<h1>${esc(c.name)}</h1></div></div>
     <div class="cols">
-      <section class="feed"><div class="row"><div class="seg" role="tablist"><button role="tab" data-act="ctab" data-t="calendar" aria-selected="${tab === "calendar"}">Calendar</button><button role="tab" data-act="ctab" data-t="feed" aria-selected="${tab === "feed"}">Recent workouts</button></div></div>
-        ${tab === "calendar" ? calendarHTML(c) : logs.map((l) => logCardHTML(l)).join("") || `<div class="empty">${db.cloud ? `No workouts logged yet. Every workout ${esc(c.name)} finishes in the app shows up here with their notes.` : `No workouts logged yet. Once accounts are live, every workout ${esc(c.name)} finishes shows up here with their notes. Until then, load the file they send from the app (Profile → Send my workouts to my coach).`}</div>`}</section>
+      <section class="feed"><div class="row"><div class="seg" role="tablist"><button role="tab" data-act="ctab" data-t="calendar" aria-selected="${tab === "calendar"}">Calendar</button><button role="tab" data-act="ctab" data-t="feed" aria-selected="${tab === "feed"}">Recent workouts</button>${db.cloud ? `<button role="tab" data-act="ctab" data-t="messages" aria-selected="${tab === "messages"}">Messages${unreadOf(cid) ? `<span class="nbadge">${unreadOf(cid)}</span>` : ""}</button>` : ""}</div></div>
+        ${tab === "messages" && db.cloud ? conversationHTML(cid) : tab === "calendar" ? calendarHTML(c) : logs.map((l) => logCardHTML(l)).join("") || `<div class="empty">${db.cloud ? `No workouts logged yet. Every workout ${esc(c.name)} finishes in the app shows up here with their notes.` : `No workouts logged yet. Once accounts are live, every workout ${esc(c.name)} finishes shows up here with their notes. Until then, load the file they send from the app (Profile → Send my workouts to my coach).`}</div>`}</section>
       <aside style="display:flex;flex-direction:column;gap:18px">
         ${maxesCardHTML(c)}
         <section class="panel"><h2>Programs</h2><div class="plist">${progs || `<div class="empty">No program yet.</div>`}</div>
@@ -356,6 +441,7 @@ function renderClient(cid) {
         <section class="panel"><h2>Coach notes</h2><textarea class="in" id="cnotes" data-c="${cid}" rows="5" placeholder="Injuries, goals, anything other coaches should know. Clients don’t see this.">${esc(c.notes || "")}</textarea></section>
       </aside>
     </div>`;
+  if (tab === "messages" && db.cloud) setTimeout(() => { const el = $("#conv"); PM.hydrate(el); markRead(cid); el?.lastElementChild?.scrollIntoView({ block: "nearest" }); }, 0);
 }
 
 /* ---- Everyone's workouts ---- */
@@ -537,6 +623,8 @@ document.addEventListener("click", (ev) => {
   const p = cur() ? prog(cur()) : null, day = p ? p.days[UI.day] : null;
   switch (a) {
     case "client-new": UI.confirm = "client-new"; route(); setTimeout(() => $("#nc-name")?.focus(), 0); break;
+    case "open-conv": UI.clientTab = "messages"; if (location.hash === "#client-" + t.dataset.c) route(); break;
+    case "cm-send": sendCoachMessage(t.dataset.c); break;
     case "copy-link": navigator.clipboard.writeText(appLink()).then(() => toast("Link copied."), () => toast(appLink())); break;
     case "signout": Cloud.signOut().then(() => location.reload()); break;
     case "reload": location.reload(); break;
@@ -611,6 +699,8 @@ document.addEventListener("input", (ev) => {
   }
   if (t.id === "pick-q" && UI.picker) { UI.picker.q = t.value; $("#pick-list").innerHTML = pickerHTML(t.value); return; }
   if (t.id === "cnotes") { client(t.dataset.c).notes = t.value; save(); return; }
+  if (t.id === "cm-body") { MS.drafts[t.dataset.c] = t.value; return; }
+  if (t.id === "cm-loom") { MS.loom[t.dataset.c] = t.value; return; }
   if (p && ["p-name", "d-name", "d-note", "d-warm", "d-cool"].includes(t.id)) {
     if (t.id === "p-name") p.name = t.value; else p.days[UI.day][{ "d-name": "name", "d-note": "note", "d-warm": "warmup", "d-cool": "cooldown" }[t.id]] = t.value;
     save(); if (t.id === "d-name") document.querySelector(`.dtab[aria-pressed="true"]`).lastChild.textContent = t.value; return;
