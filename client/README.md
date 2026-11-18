@@ -33,7 +33,7 @@ Local storage keys use the `pp1.` prefix and caches use `pp-`, so this app never
 
 The guide shows, in order of preference:
 1. A YouTube link on the program item (`"video": "https://youtu.be/…"`) — the coach can attach any of the gym's tutorials to an exercise in a client's program.
-2. The gym's default video for that exercise (`GYM_VIDEOS` in `app.js`, currently Pull-up / Chin-up → "Pull Up Variations" and Barbell Hip Thrust → "Barbell Hip Thrusts: Hinge Your Way to Stronger Glutes" from youtube.com/@powerplantgym).
+2. The gym's default video for that exercise (`GYM_VIDEOS` in `app.js`: tutorials from youtube.com/@powerplantgym for Romanian Deadlift, Barbell Hip Thrust, Bulgarian Split Squat, Walking Lunge, Bench Press, Pull-up, Chin-up, Back Extension, Overhead Press, Triceps Pushdown and Plank).
 3. A file at `videos/<exercise id>.mp4`.
 4. Otherwise, "Video demo coming soon".
 
