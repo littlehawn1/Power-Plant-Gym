@@ -269,6 +269,14 @@ $$;
 revoke execute on function public.report_5rm(text, numeric, numeric) from public, anon;
 grant execute on function public.report_5rm(text, numeric, numeric) to authenticated;
 
+-- Coaches' first names for message bubbles. Clients can't read other people's profiles, so this returns just names.
+create or replace function public.coach_names() returns table (id uuid, name text)
+language sql stable security definer set search_path = public as $$
+  select p.id, coalesce(nullif(split_part(p.name, ' ', 1), ''), 'Coach') from public.profiles p where p.role = 'coach';
+$$;
+revoke execute on function public.coach_names() from public, anon;
+grant execute on function public.coach_names() to authenticated;
+
 -- ============================================================
 -- Form-check video storage
 -- ============================================================

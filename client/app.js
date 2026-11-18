@@ -2,7 +2,7 @@
    Data lives on the phone and syncs to the client's account in the gym's Supabase project (see "Account + sync"). */
 (() => {
 "use strict";
-const APP_VERSION = "0.5.0";
+const APP_VERSION = "0.6.0";
 const PP = window.PPProgram;
 const APP_NAME = "Power Plant";
 
@@ -389,7 +389,7 @@ function finishWorkout() {
   if (prs.length && w.exercises.length) { w.prs = prs; saveWorkouts(); }
   if (a.routine) S.state.next = nextRoutineAfter(a.routine);
   S.state.active = null;
-  S.ui.summary = { name: a.name, minutes, results, prs, coach: !!a.prog, volume: w.volume, sets: w.exercises.reduce((n, ex) => n + ex.sets.filter((x) => x.t !== "w").length, 0), maxes: newMaxes, confetti: true };
+  S.ui.summary = { wid: w.exercises.length ? w.id : null, name: a.name, minutes, results, prs, coach: !!a.prog, volume: w.volume, sets: w.exercises.reduce((n, ex) => n + ex.sets.filter((x) => x.t !== "w").length, 0), maxes: newMaxes, confetti: true };
   S.ui.confirm = null;
   releaseWake(); saveState(); render(); window.scrollTo(0, 0);
 }
@@ -794,7 +794,7 @@ function renderSummary() {
       : r.outcome === "build" ? `<span class="pill">Same weight, chase ${r.repsMax}s</span>`
       : r.outcome === "deload" ? `<span class="pill warn">Deload to ${esc(weightLabel(e, r.next))}</span>`
       : r.outcome === "repeat" ? `<span class="pill warn">Repeat ${esc(weightLabel(e, r.next))}</span>` : `<span class="pill">Warm-ups only</span>`;
-    return `<div class="line"><span><b>${esc(r.name)}</b><br><span class="sub num">${esc(sets)}</span></span>${pill}</div>`;
+    return `<div class="line"><span><b>${esc(r.name)}</b><br><span class="sub num">${esc(sets)}</span>${CL.user && sm.wid ? `<br><button class="btn small ghost" data-act="fc" data-ex="${esc(r.ex)}" data-w="${esc(sm.wid)}">🎥 Send a form check</button>` : ""}</span>${pill}</div>`;
   }).join("");
   const u = S.state.units;
   const prs = sm.prs.length ? `<section class="panel"><h2>New records</h2>${sm.prs.map((p) => `<div class="row"><span class="pr">PR</span><span>${esc(p)}</span></div>`).join("")}</section>` : "";
@@ -1010,7 +1010,7 @@ function renderHistory() {
     }).join("");
     const confirming = S.ui.confirm === "del:" + w.id;
     return `<div class="log-item"><div class="hd"><b>${esc(wName(w))}</b><span class="sub">${dateLabel(w.date)}${w.minutes ? ` · ${w.minutes} min` : ""}</span></div>${lines}${w.note ? `<span class="sub">Note: ${esc(w.note)}</span>` : ""}
-      <div class="row end">${confirming ? `<span class="sub grow">Delete this entry? Weights won’t change.</span><button class="btn small ghost" data-act="confirm-no">Keep</button><button class="btn small danger" data-act="del-yes" data-id="${esc(w.id)}">Delete</button>` : `<button class="btn small ghost" data-act="del" data-id="${esc(w.id)}">Delete</button>`}</div></div>`;
+      <div class="row end">${confirming ? `<span class="sub grow">Delete this entry? Weights won’t change.</span><button class="btn small ghost" data-act="confirm-no">Keep</button><button class="btn small danger" data-act="del-yes" data-id="${esc(w.id)}">Delete</button>` : `${CL.user ? `<button class="btn small ghost" data-act="fc" data-w="${esc(w.id)}">🎥 Form check</button>` : ""}<button class="btn small ghost" data-act="del" data-id="${esc(w.id)}">Delete</button>`}</div></div>`;
   }).join("");
   return `${header(`${S.workouts.length} workout${S.workouts.length === 1 ? "" : "s"} logged`, "Progress")}
     <section class="panel"><h2>Last 7 days</h2>
@@ -1173,12 +1173,14 @@ function render() {
   const v = S.ui.view;
   document.querySelectorAll("nav.tabs a").forEach((a) => a.setAttribute("aria-current", a.dataset.tab === v ? "page" : "false"));
   const focusedId = document.activeElement && document.activeElement.id;
-  $("#app").innerHTML = v === "history" ? renderHistory() : v === "program" ? renderProgram() : v === "setup" ? renderSetup() : v === "plan" ? renderPlan() : renderWorkout();
+  $("#app").innerHTML = v === "history" ? renderHistory() : v === "program" ? renderProgram() : v === "setup" ? renderSetup() : v === "plan" ? renderPlan() : v === "coach" ? renderCoach() : renderWorkout();
+  if (v === "coach") afterCoachRender();
+  msgBadge();
   if (focusedId && focusedId !== "pick-q") { const el = document.getElementById(focusedId); if (el && el.closest("#app")) el.focus(); }
   if (S.ui.summary && S.ui.summary.confetti && v === "workout") { S.ui.summary.confetti = false; confetti(); }
   syncRest();
 }
-const VIEWS = ["workout", "program", "plan", "history", "setup"];
+const VIEWS = ["workout", "program", "plan", "history", "coach", "setup"];
 function route() {
   const h = location.hash.replace("#", "");
   S.ui.view = VIEWS.includes(h) ? h : "workout";
@@ -1278,6 +1280,9 @@ document.addEventListener("click", async (ev) => {
     case "reset": S.ui.confirm = "reset"; render(); break;
     case "reset-yes": S.state = { ...defaults(st.units), coachLog: st.coachLog }; S.ui.confirm = null; saveState(); render(); break;
     case "signout": signOutNow(); break;
+    case "fc": S.ui.compose = { ex: b.dataset.ex || "", wid: b.dataset.w || "" }; MSG.err = ""; S.ui.summary = null; location.hash = "#coach"; if (S.ui.view === "coach") render(); break;
+    case "m-send": sendMessage(); break;
+    case "m-clear-file": { const f = $("#m-file"); if (f) f.value = ""; $("#m-fname").textContent = ""; b.hidden = true; break; }
     case "sw-update": swUpdate(); break;
     case "sw-reload": location.reload(); break;
   }
@@ -1293,6 +1298,7 @@ document.addEventListener("input", (ev) => {
   if (t.dataset.note != null && S.state.active) { S.state.active.items[+t.dataset.note].note = t.value; saveState(); return; }
   if (t.dataset.wnote && S.state.active) { S.state.active.note = t.value; saveState(); return; }
   if (t.id === "pick-q" && S.ui.picker) { S.ui.picker.q = t.value; renderPickList(); }
+  if (t.id === "m-body") S.ui.draft = t.value;
 });
 document.addEventListener("change", (ev) => {
   const t = ev.target, st = S.state;
@@ -1315,6 +1321,14 @@ document.addEventListener("change", (ev) => {
   if (t.dataset.rm5) { const v = parseFloat(t.value); if (isFinite(v) && v > 0) st.rm5[t.dataset.rm5] = v; else delete st.rm5[t.dataset.rm5]; saveState(); render(); return; }
   if (t.dataset.pin) { const v = t.value.trim().slice(0, 300); if (v) st.exNotes[t.dataset.pin] = v; else delete st.exNotes[t.dataset.pin]; saveState(); renderSheet(); return; }
   if (t.id === "chart-ex") { S.ui.chartEx = t.value; render(); return; }
+  if (t.id === "m-ex" || t.id === "m-w") { S.ui.compose = { ...(S.ui.compose || {}), [t.id === "m-ex" ? "ex" : "wid"]: t.value }; return; }
+  if (t.id === "m-file") {
+    const f = t.files && t.files[0], err = window.PPMessages.checkVideo(f);
+    if (err) { t.value = ""; MSG.err = err; refreshCompose(); return; }
+    MSG.err = ""; refreshCompose();
+    $("#m-fname").textContent = f ? `${f.name} · ${Math.max(1, Math.round(f.size / 1048576))} MB` : ""; $("[data-act='m-clear-file']").hidden = !f;
+    return;
+  }
   if (t.id === "ne-kind" || t.id === "ne-muscle" || t.id === "ne-track") { S.ui.newEx = { kind: $("#ne-kind").value, muscle: $("#ne-muscle").value, track: $("#ne-track").value }; return; }
   if (t.id === "imp") {
     const files = [...(t.files || [])]; if (!files.length) return;
@@ -1395,7 +1409,7 @@ if ("serviceWorker" in navigator && location.protocol !== "file:") {
 // and the coach's program, maxes and anything changed on another device come down on start and on return.
 const Cloud = window.PPCloud;
 const CL = { user: null, pushing: false, again: false, failed: false, timer: null, pulledAt: 0 };
-const LOCAL_KEYS = ["pp1.state", "pp1.workouts", "pp1.days", "pp1.program", "pp1.wsync", "pp1.stateAt", "pp1.stateSynced", "pp1.uid"];
+const LOCAL_KEYS = ["pp1.state", "pp1.workouts", "pp1.days", "pp1.program", "pp1.wsync", "pp1.stateAt", "pp1.stateSynced", "pp1.uid", "pp1.msgs"];
 function stateChanged() { lsSet("pp1.stateAt", Date.now()); cloudSoon(); }
 function cloudSoon(ms = 2000) { if (!CL.user) return; clearTimeout(CL.timer); CL.timer = setTimeout(pushAll, ms); }
 const RECENT = 14 * 864e5; // new 5RMs from workouts older than this aren't sent to the coach again
@@ -1500,13 +1514,114 @@ async function startCloud() {
   if (!s || Cloud.isRecovery()) s = await Cloud.authScreen({ app: APP_NAME, sub: "Use the email you gave the gym. First time? Create an account." });
   if (!s) return;
   const prev = lsGet("pp1.uid");
-  if (prev && prev !== s.user.id) { for (const k of LOCAL_KEYS) try { localStorage.removeItem(k); } catch {} load(); } // someone else used this phone
+  if (prev && prev !== s.user.id) { for (const k of LOCAL_KEYS) try { localStorage.removeItem(k); } catch {} load(); MSG.list = []; } // someone else used this phone
   lsSet("pp1.uid", s.user.id);
   CL.user = s.user; render();
   try { await pull(); } catch { CL.failed = true; }
-  window.addEventListener("online", () => { pushAll(); });
-  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && Date.now() - CL.pulledAt > 60000) pull().catch(() => {}); });
+  loadCoachNames().then(() => loadMessages()).catch(() => {});
+  subscribeMessages();
+  window.addEventListener("online", () => { pushAll(); loadMessages().catch(() => {}); });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    if (Date.now() - CL.pulledAt > 60000) pull().catch(() => {});
+    loadMessages().catch(() => {});
+  });
   Cloud.client().auth.onAuthStateChange((ev) => { if (ev === "SIGNED_OUT" && CL.user && !CL.leaving) { CL.user = null; location.reload(); } });
+}
+
+/* ================= Messages with the coaches ================= */
+// One conversation per client that every coach can answer. Clients can attach a form-check video tied to a movement
+// and a workout; coaches can answer with a Loom video. Loaded on sign-in, kept live, cached on the phone for offline reading.
+const PM = window.PPMessages;
+const MSG = { list: lsGet("pp1.msgs") || [], coaches: {}, err: "", sending: false, ch: null };
+const unreadCount = () => (CL.user ? MSG.list.filter((m) => m.sender_id !== CL.user.id && !m.read_at).length : 0);
+function msgBadge() { const el = document.querySelector('[data-tab="coach"] .badge'); if (!el) return; const n = unreadCount(); el.textContent = n > 9 ? "9+" : String(n); el.hidden = !n; }
+async function loadMessages() {
+  const c = Cloud && Cloud.client(); if (!CL.user || !c) return;
+  const r = await c.from("messages").select(PM.COLS).eq("client_id", CL.user.id).order("created_at", { ascending: true }).limit(1000);
+  if (r.error) return;
+  const changed = Cloud.hash(r.data) !== Cloud.hash(MSG.list);
+  MSG.list = r.data; lsSet("pp1.msgs", MSG.list);
+  if (S.ui.view === "coach") { if (changed) refreshConversation(); markRead(); } else msgBadge();
+}
+async function loadCoachNames() {
+  const c = Cloud.client(); try { const { data } = await c.rpc("coach_names"); for (const x of data || []) MSG.coaches[x.id] = x.name; } catch {}
+}
+async function markRead() {
+  const c = Cloud && Cloud.client(), uid = CL.user && CL.user.id; if (!uid || !c || document.visibilityState !== "visible") return;
+  const unread = MSG.list.filter((m) => m.sender_id !== uid && !m.read_at); if (!unread.length) return;
+  const now = new Date().toISOString();
+  const { error } = await c.from("messages").update({ read_at: now }).eq("client_id", uid).neq("sender_id", uid).is("read_at", null);
+  if (!error) { for (const m of unread) m.read_at = now; lsSet("pp1.msgs", MSG.list); msgBadge(); }
+}
+function subscribeMessages() {
+  const c = Cloud.client(); if (!c.channel || MSG.ch) return;
+  MSG.ch = c.channel("msgs-" + CL.user.id)
+    .on("postgres_changes", { event: "*", schema: "public", table: "messages", filter: `client_id=eq.${CL.user.id}` }, () => loadMessages())
+    .subscribe();
+}
+function conversationHTML() {
+  const uid = CL.user.id;
+  if (!MSG.list.length) return `<div class="pm-empty">No messages yet. Ask your coach anything, or send a short video of a lift for feedback on your form.</div>`;
+  return MSG.list.map((m) => {
+    const mine = m.sender_id === uid, w = m.workout_id && S.workouts.find((x) => x.id === m.workout_id);
+    const tag = m.ex || w ? `Form check${m.ex ? " · " + esc(getEx(m.ex).name) : ""}${w ? " · " + esc(dateLabel(w.date)) : ""}` : "";
+    return PM.bubble(m, { mine, who: mine ? "You" : MSG.coaches[m.sender_id] || "Your coach", tag });
+  }).join("");
+}
+function composeHTML() {
+  const cm = S.ui.compose || {};
+  const ids = new Set(); const pr = program();
+  if (pr && pr.weeks) for (const wk of pr.weeks) for (const d of wk.days) for (const it of d.items) ids.add(it.ex);
+  for (const w of S.workouts.slice(0, 20)) for (const e of w.exercises || []) ids.add(e.ex || e.lift);
+  if (cm.ex) ids.add(cm.ex);
+  const exOpts = [...ids].filter((id) => id && meta(id)).map((id) => [id, getEx(id).name]).sort((a, b) => a[1].localeCompare(b[1]))
+    .map(([id, n]) => `<option value="${esc(id)}" ${id === cm.ex ? "selected" : ""}>${esc(n)}</option>`).join("");
+  const wOpts = S.workouts.slice(0, 20).map((w) => `<option value="${esc(w.id)}" ${w.id === cm.wid ? "selected" : ""}>${esc(dateLabel(w.date))} · ${esc(wName(w))}</option>`).join("");
+  return `<textarea id="m-body" class="text-in" rows="3" placeholder="Message your coaches. For a form check, say what felt off." aria-label="Message">${esc(S.ui.draft || "")}</textarea>
+    <div class="row"><label class="btn small" for="m-file" role="button" tabindex="0">🎥 Add a video</label><input type="file" id="m-file" accept="video/mp4,video/quicktime,video/webm,video/*" hidden>
+      <span class="note grow" id="m-fname"></span><button class="btn small ghost" data-act="m-clear-file" hidden>Remove</button></div>
+    <div class="row"><select id="m-ex" class="text-in" aria-label="Movement"><option value="">Movement (optional)</option>${exOpts}</select>
+      <select id="m-w" class="text-in" aria-label="Workout"><option value="">Workout (optional)</option>${wOpts}</select></div>
+    <div id="m-err">${MSG.err ? `<span class="note" role="alert" style="color:var(--accent)">${esc(MSG.err)}</span>` : ""}</div>
+    <button class="btn primary" data-act="m-send" ${MSG.sending ? "disabled" : ""}>${MSG.sending ? "Sending…" : "Send"}</button>
+    <span class="note">Videos up to 50 MB (about a minute from a phone). Every coach at the gym can read and answer this conversation.</span>`;
+}
+function renderCoach() {
+  PM.css();
+  if (!CL.user) return `${header("Messages", "Coach")}<section class="panel"><span class="sub">Sign in to message your coaches.</span></section>`;
+  return `${header("Messages", "Coach")}
+    <section class="pm-list" id="conv">${conversationHTML()}</section>
+    <section class="panel compose" id="compose">${composeHTML()}</section>`;
+}
+function afterCoachRender() { PM.hydrate($("#conv")); markRead(); if (S.ui.compose && (S.ui.compose.ex || S.ui.compose.wid)) $("#compose")?.scrollIntoView({ block: "end" }); else $("#conv")?.lastElementChild?.scrollIntoView({ block: "end" }); }
+// Update the conversation without touching what's being typed.
+function refreshConversation() { const el = $("#conv"); if (!el) return; el.innerHTML = conversationHTML(); PM.hydrate(el); el.lastElementChild?.scrollIntoView({ block: "end" }); msgBadge(); }
+function refreshCompose() { const el = $("#m-err"); if (el) el.innerHTML = MSG.err ? `<span class="note" role="alert" style="color:var(--accent)">${esc(MSG.err)}</span>` : ""; const b = $("[data-act='m-send']"); if (b) { b.disabled = MSG.sending; b.textContent = MSG.sending ? "Sending…" : "Send"; } }
+async function sendMessage() {
+  if (MSG.sending || !CL.user) return;
+  const c = Cloud.client(), uid = CL.user.id;
+  const body = ($("#m-body")?.value || "").trim(), file = $("#m-file")?.files?.[0] || null;
+  const ex = $("#m-ex")?.value || null, wid = $("#m-w")?.value || null;
+  if (!body && !file) { MSG.err = "Write a message or add a video first."; refreshCompose(); return; }
+  const bad = PM.checkVideo(file); if (bad) { MSG.err = bad; refreshCompose(); return; }
+  if (!navigator.onLine) { MSG.err = "You’re offline. Send this when you have a connection."; refreshCompose(); return; }
+  MSG.sending = true; MSG.err = file ? "" : ""; refreshCompose();
+  if (file) { const el = $("#m-err"); if (el) el.innerHTML = `<span class="note">Uploading the video… keep the app open.</span>`; }
+  let path = null;
+  try {
+    // The workout has to be in the account before a message can point at it.
+    let workout = wid && (lsGet("pp1.wsync") || {})[wid] ? wid : null;
+    if (wid && !workout) { clearTimeout(CL.timer); await pushAll(); workout = (lsGet("pp1.wsync") || {})[wid] ? wid : null; }
+    if (file) path = await PM.upload(uid, file);
+    const { error } = await c.from("messages").insert({ client_id: uid, sender_id: uid, body, video_path: path, workout_id: workout, ex: ex || null });
+    if (error) throw error;
+    S.ui.draft = ""; S.ui.compose = null; MSG.err = ""; MSG.sending = false;
+    await loadMessages(); render();
+  } catch (e) {
+    if (path) PM.removeUpload(path);
+    MSG.sending = false; MSG.err = "Couldn’t send: " + Cloud.friendly(e); refreshCompose();
+  }
 }
 
 /* ================= Boot ================= */
