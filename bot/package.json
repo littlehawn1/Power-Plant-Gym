@@ -1,0 +1,15 @@
+{
+  "name": "powerplant-setup-bot",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/worker.js --bundle --format=esm --platform=neutral --main-fields=module,main --conditions=worker,browser --external:node:* --outfile=dist/worker.js",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "latest"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0"
+  }
+}
