@@ -161,6 +161,7 @@ async function converse(env, chatId, userContent) {
       if (e instanceof Anthropic.AuthenticationError) return "I can't reach my brain right now (the Claude key isn't working). I'll let the app's builder know.";
       console.error("Claude API error", e.status, e.message);
       await env.KV.put("last_error", JSON.stringify({ at: new Date().toISOString(), status: e.status, message: String(e.message).slice(0, 2000) }));
+      if (/credit balance/i.test(String(e.message))) return "I'm out of credit to think with right now, so I can't answer. I'll let Josh know; your messages are saved.";
       if (e instanceof Anthropic.APIError) return "Something went wrong on my end. Could you send that again in a minute?";
       throw e;
     }
