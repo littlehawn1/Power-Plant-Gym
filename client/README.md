@@ -21,6 +21,8 @@ Accounts aren't connected yet. Until the gym's Supabase project exists, data is 
 
 `load.t` is `lb` (fixed weight), `pct` (% of the client's max), `rpe` (target effort) or `none`. Timed items use `time` (seconds) and carries/runs use `dist`.
 
+**Supersets and circuits:** give consecutive items the same `group` letter (`"group": "A"`). Two items make a superset, three or more a circuit. There's no rest between them; the `rest` on the last item in the group runs after each round. Clients can also link exercises into a superset in their own workouts.
+
 ## Files
 
 Same structure as Lift Log: `index.html`, `styles.css`, `app.js`, `exercises.js` (exercise library text), `sw.js` (offline + automatic updates), `manifest.webmanifest`, `icons/`, and `videos/<exercise id>.mp4` for coach demo videos.
