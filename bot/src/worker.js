@@ -12,18 +12,16 @@ import Anthropic from "@anthropic-ai/sdk";
 
 const MODEL = "claude-opus-5-5";
 const MAX_HISTORY_MESSAGES = 300;
-const KEEP_PHOTOS_IN_LAST = 12; // older photos/files are swapped for a placeholder to keep requests small
 
 const isToolResult = (m) => m.role === "user" && Array.isArray(m.content) && m.content.some((b) => b.type === "tool_result");
-/* The slice of history sent to Claude. It must start with a plain user message: starting on an
-   assistant turn or on a tool result whose tool call was cut off makes the API reject the request. */
+/* The history sent to Claude. It is sent exactly as stored, never rewritten: Claude's thinking is tied
+   to the conversation it was made in, so changing an earlier message (for example swapping an old photo
+   for a placeholder) makes the API reject every later reply. Only a very long chat is trimmed, from the
+   front, and the trim must start on a plain user message. */
 function window_(history) {
   let start = Math.max(0, history.length - MAX_HISTORY_MESSAGES);
   while (start < history.length && (history[start].role !== "user" || isToolResult(history[start]))) start++;
-  return history.slice(start).map((m, i, all) => {
-    if (i >= all.length - KEEP_PHOTOS_IN_LAST || m.role !== "user" || !Array.isArray(m.content)) return m;
-    return { ...m, content: m.content.map((b) => (b.type === "image" || b.type === "document") ? { type: "text", text: "[a photo or file she sent earlier; what it showed is in your notes]" } : b) };
-  });
+  return history.slice(start);
 }
 
 const SYSTEM = `You are the setup interviewer for Power Plant Gym's new coaching software. You're chatting on Telegram with Jess, a strength and strongman coach at Power Plant Gym in Aston, PA. Someone in her family is building two things for the gym with help from Claude, and you're gathering what they need to get it right:
@@ -150,7 +148,9 @@ async function converse(env, chatId, userContent) {
         model: MODEL,
         max_tokens: 4000,
         output_config: { effort: "low" },
-        betas: ["server-side-fallback-2026-07-01"],
+        betas: ["server-side-fallback-2026-07-01", "thinking-binding-controls-2026-08-01"],
+        // If an older thinking block no longer matches the history, drop it instead of failing the reply.
+        thinking: { type: "adaptive", block_binding: { prefix_mismatch_behavior: "drop_block" } },
         fallbacks: "default",
         system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }],
         tools: TOOLS,
@@ -160,6 +160,7 @@ async function converse(env, chatId, userContent) {
       if (e instanceof Anthropic.RateLimitError) return "I'm getting a lot of messages right now. Give me a minute and send that again?";
       if (e instanceof Anthropic.AuthenticationError) return "I can't reach my brain right now (the Claude key isn't working). I'll let the app's builder know.";
       console.error("Claude API error", e.status, e.message);
+      await env.KV.put("last_error", JSON.stringify({ at: new Date().toISOString(), status: e.status, message: String(e.message).slice(0, 2000) }));
       if (e instanceof Anthropic.APIError) return "Something went wrong on my end. Could you send that again in a minute?";
       throw e;
     }
