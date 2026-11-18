@@ -30,14 +30,21 @@ const fieldsText = (f) => f.map((k) => LIBR.FIELD_NAMES[k].toLowerCase()).join("
 /* ================= Data (this browser until accounts are live) ================= */
 const KEY = "ppc1.db";
 let db = null;
-function load() { try { db = JSON.parse(localStorage.getItem(KEY)); } catch { db = null; } if (!db || !db.v) db = seed(); }
+function load() { try { db = JSON.parse(localStorage.getItem(KEY)); } catch { db = null; } if (!db || !db.v) db = seed(); migrate(db); }
+function migrate(d) {
+  d.maxTemplates = d.maxTemplates || [{ id: "mt1", name: "Squat, bench, deadlift", lifts: ["squat", "bench", "deadlift"] }];
+  d.dayNotes = d.dayNotes || {};
+  for (const c of d.clients) c.maxes = c.maxes || {};
+  d.v = 2;
+}
 let saveT = null;
 function save() { clearTimeout(saveT); saveT = setTimeout(() => { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch { toast("Couldn’t save in this browser. Free some space and try again."); } }, 250); }
 window.addEventListener("pagehide", () => { clearTimeout(saveT); try { localStorage.setItem(KEY, JSON.stringify(db)); } catch {} });
 function seed() {
-  const d = { v: 1, sample: true, me: "c1", coaches: [{ id: "c1", name: "You" }, { id: "c2", name: "Second coach (sample)" }], clients: [], programs: [], logs: [], custom: {} };
+  const d = { v: 2, sample: true, me: "c1", coaches: [{ id: "c1", name: "You" }, { id: "c2", name: "Second coach (sample)" }], clients: [], programs: [], logs: [], custom: {}, dayNotes: {} };
   d.clients = [
-    { id: "k1", name: "Sample client: Alex", email: "", coachId: "c1", remote: true, notes: "Remote client. Old left knee irritation, watch deep knee flexion." },
+    { id: "k1", name: "Sample client: Alex", email: "", coachId: "c1", remote: true, notes: "Remote client. Old left knee irritation, watch deep knee flexion.",
+      maxes: { squat: { rm5: 185 }, bench: { rm5: 130, rm1: 160, target: 155 }, trap_dl: { rm5: 230, pending: { rm5: 245, suggested: 300, at: new Date(Date.now() - 2 * 864e5).toISOString() } } } },
     { id: "k2", name: "Sample client: Jordan", email: "", coachId: "c1", remote: false, notes: "Training for first strongman show in spring." },
     { id: "k3", name: "Sample client: Sam", email: "", coachId: "c2", remote: false, notes: "" },
   ];
@@ -45,14 +52,17 @@ function seed() {
   pr.days[0].warmup = "5 min bike, 10 bodyweight squats, 10 glute bridges, 2 rounds.";
   d.programs.push(pr);
   // Sample logged workouts, built from the program's first week so the feed has something to show.
-  const c = P.compile(pr), max = { squat: 225, bench: 155, trap_dl: 275 };
+  pr.startDate = (() => { const x = new Date(); x.setDate(x.getDate() - ((x.getDay() + 6) % 7) - 7); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`; })(); // started last week
+  const c = P.compile(pr), max = { squat: 225, bench: 155, trap_dl: 280 };
   const loadW = (ex, g) => (g.load && g.load.t === "pct" && max[ex] ? Math.round((max[ex] * g.load.v) / 100 / 5) * 5 : g.load && (g.load.t === "lb") ? g.load.v : g.load && g.load.t === "rpe" ? ({ rdl: 135, row: 115, bulgarian: 25, db_shoulder: 30, face_pull: 40 }[ex] || 0) : 0);
-  const notes = { squat: "Left knee felt a little tight on the last back-off set.", sled_push: "Turf was slippery today." };
+  const notes = { squat: "Left knee felt a little tight on the last back-off set, a bit of pain going down.", sled_push: "Turf was slippery today." };
   c.weeks[0].days.forEach((day, di) => {
-    const date = new Date(Date.now() - (6 - di * 2) * 864e5).toISOString();
-    d.logs.push({ id: uid("l"), clientId: "k1", date, name: `Week 1 · ${day.name}`, minutes: 52 + di * 4, note: di === 0 ? "Slept badly, energy was low at the start." : "",
-      exercises: day.items.map((it) => ({ ex: it.ex, rx: P.prescriptionText(it), note: notes[it.ex] || "",
-        sets: it.groups.flatMap((g) => Array.from({ length: g.sets }, () => ({ w: loadW(it.ex, g), r: g.reps || 8, s: g.time || (g.dist ? 14 + Math.round(Math.random() * 4) : 0), d: g.dist || 0 }))) })) });
+    if (di === 1) return; // week 1 Wednesday was missed
+    const date = day.date + "T17:30:00";
+    d.logs.push({ id: uid("l"), clientId: "k1", date, name: `Week 1 · ${day.name}`, prog: { id: pr.id, w: 0, d: di }, minutes: 52 + di * 4, note: di === 0 ? "Slept badly, energy was low at the start." : "",
+      prs: di === 2 ? ["Trap Bar Deadlift: 245×5"] : [], maxes: di === 2 ? [{ ex: "trap_dl", name: "Trap Bar Deadlift", rm5: 245, prev: 230, suggested: 300 }] : [],
+      exercises: day.items.map((it) => ({ ex: it.ex, rx: P.prescriptionText(it), rxSets: it.groups.reduce((n, g) => n + g.sets, 0), rxReps: (it.groups[0] || {}).reps || 0, note: notes[it.ex] || "",
+        sets: it.groups.flatMap((g) => Array.from({ length: g.sets }, (_, k) => ({ w: it.ex === "trap_dl" && k === 0 ? 245 : loadW(it.ex, g), r: it.ex === "rdl" && k === 2 ? 6 : g.reps || (g.dist || g.time ? 0 : 8), s: g.time || (g.dist ? 14 + Math.round(Math.random() * 4) : 0), d: g.dist || 0 }))) })) });
   });
   return d;
 }
@@ -66,12 +76,14 @@ function programWeekNow(p) {
 }
 
 /* ================= Views ================= */
-const UI = { day: 0, previewWeek: 0, editing: null, picker: null, confirm: null };
+const UI = { day: 0, previewWeek: 0, editing: null, picker: null, confirm: null, clientTab: "calendar", calMonth: null, feedFlagged: false };
 function route() {
   const h = location.hash.slice(1);
   let m;
   if ((m = h.match(/^program-(.+)$/)) && db.programs.find((p) => p.id === m[1])) return renderProgram(m[1]);
   if ((m = h.match(/^client-(.+)$/)) && client(m[1])) return renderClient(m[1]);
+  if (h === "feed") return renderFeed();
+  if (h === "templates") return renderTemplates();
   return renderClients();
 }
 function setNav(k) { document.querySelectorAll("[data-nav]").forEach((a) => a.setAttribute("aria-current", a.dataset.nav === k ? "page" : "false")); }
@@ -83,12 +95,13 @@ function renderTop() {
 function renderClients() {
   setNav("clients");
   const rows = db.clients.map((c) => {
-    const ps = programsOf(c.id), cur = ps[ps.length - 1], last = db.logs.filter((l) => l.clientId === c.id).sort((a, b) => (a.date < b.date ? 1 : -1))[0];
+    const ps = programsOf(c.id), cur = ps[ps.length - 1], last = logsOf(c.id)[0], pend = Object.values(c.maxes || {}).some((m) => m.pending), lf = last ? logFlags(last) : null;
     const coach = db.coaches.find((x) => x.id === c.coachId);
     return `<a class="panel ccard" href="#client-${c.id}"><b>${esc(c.name)}</b>
       <span class="sub">${coach ? "Coach: " + esc(coach.name) : ""}${c.remote ? " · Remote" : " · In person"}</span>
       <span>${cur ? `${esc(cur.name)} · <span class="sub">${esc(programWeekNow(cur) || "")}</span>` : `<span class="sub">No program yet</span>`}</span>
-      <span class="sub">${last ? `Last workout ${dateLabel(last.date)}: ${esc(last.name)}` : "No workouts logged yet"}</span></a>`;
+      <span class="sub">${last ? `Last workout ${dateLabel(last.date)}: ${esc(last.name)}` : "No workouts logged yet"}</span>
+      ${pend || (lf && lf.any) ? `<span class="flags">${pend ? `<span class="flag pr">Target max to review</span>` : ""}${lf && lf.pain.length ? `<span class="flag pain">Pain noted</span>` : ""}${lf && lf.missed.length ? `<span class="flag miss">Missed reps</span>` : ""}</span>` : ""}</a>`;
   }).join("");
   $("#view").innerHTML = `<div class="row"><div class="grow"><div class="eyebrow">${db.clients.length} clients · everyone’s clients are visible to every coach</div><h1>Clients</h1></div>
       <button class="btn primary" data-act="client-new">+ Add client</button></div>
@@ -102,30 +115,138 @@ function renderClients() {
 }
 
 function setsText(e) {
-  const f = e.sets[0] ? Object.keys(e.sets[0]) : [];
-  return e.sets.map((x) => [x.w ? x.w + (x.r ? "×" + x.r : "") : x.r ? x.r + " reps" : "", x.d ? x.d + (x.w ? "" : "") + "yd" : "", x.s ? mmss(x.s) : "", x.h ? x.h + "in" : ""].filter(Boolean).join(" ")).join(", ");
+  return (e.sets || []).filter((x) => x.t !== "w").map((x) => [x.w ? x.w + (x.r ? "×" + x.r : "") : x.r ? x.r + " reps" : "", x.d ? x.d + "yd" : "", x.s ? mmss(x.s) : "", x.h ? x.h + "in" : ""].filter(Boolean).join(" ")).join(", ");
 }
+const rxStr = (e) => (typeof e.rx === "string" ? e.rx : e.rx ? P.prescriptionText(e.rx) : "");
+// What a coach should notice in a finished workout: PRs and new maxes, missed reps or sets, pain.
+const PAIN = /\b(pain|painful|hurt|hurts|hurting|tweak|tweaked|injur|sharp|pinch|strain|sore knee|sore back|sore shoulder)/i;
+function logFlags(l) {
+  const f = { pr: [...(l.prs || []), ...(l.maxes || []).map((m) => `New 5RM: ${m.name || exMeta(m.ex).name} ${m.rm5}`)], missed: [], pain: [] };
+  for (const e of l.exercises || []) {
+    const name = exMeta(e.ex).name, rx = e.rx && typeof e.rx === "object" ? e.rx : null;
+    const want = rx && rx.groups ? rx.groups.reduce((n, g) => n + g.sets, 0) : e.rxSets || 0;
+    const work = (e.sets || []).filter((x) => x.t !== "w");
+    if (want && work.length < want) f.missed.push(`${name}: ${work.length} of ${want} sets`);
+    const minReps = rx && rx.groups ? Math.min(...rx.groups.filter((g) => g.reps && !g.amrap).map((g) => g.reps)) : e.rxReps || 0;
+    if (minReps > 0 && isFinite(minReps) && work.some((x) => x.r > 0 && x.r < minReps)) f.missed.push(`${name}: under ${minReps} reps`);
+    if (PAIN.test(e.note || "")) f.pain.push(`${name}: “${e.note}”`);
+  }
+  if (PAIN.test(l.note || "")) f.pain.push(`“${l.note}”`);
+  f.any = f.pr.length + f.missed.length + f.pain.length > 0;
+  return f;
+}
+function logCardHTML(l, showClient) {
+  const f = logFlags(l), c = client(l.clientId);
+  return `<article class="panel wcard${f.pain.length ? " has-pain" : ""}"><div class="hd"><b>${showClient && c ? `<a href="#client-${c.id}">${esc(c.name)}</a> · ` : ""}${esc(l.name)}</b><span class="sub">${dateLabel(l.date)}${l.minutes ? ` · ${l.minutes} min` : ""}${l.volume ? ` · ${l.volume.toLocaleString()} lb lifted` : ""}</span></div>
+    ${f.any ? `<div class="flags">${f.pr.map((x) => `<span class="flag pr">PR · ${esc(x)}</span>`).join("")}${f.missed.map((x) => `<span class="flag miss">Missed · ${esc(x)}</span>`).join("")}${f.pain.map((x) => `<span class="flag pain">Pain · ${esc(x)}</span>`).join("")}</div>` : ""}
+    ${l.note ? `<div class="cnote">“${esc(l.note)}”</div>` : ""}
+    ${(l.exercises || []).map((e) => `<div class="wex"><span><b>${esc(exMeta(e.ex).name)}</b><br><span class="rx">${esc(rxStr(e))}</span></span><span class="num">${esc(setsText(e))}${e.note ? `<div class="cnote" style="margin-top:6px">“${esc(e.note)}”</div>` : ""}</span></div>`).join("")}
+  </article>`;
+}
+const logsOf = (cid) => db.logs.filter((l) => l.clientId === cid).sort((a, b) => (a.date < b.date ? 1 : -1));
+
+/* ---- Maxes ---- */
+const UNITS = "lb";
+function maxesCardHTML(c) {
+  const ids = Object.keys(c.maxes);
+  const rows = ids.map((id) => {
+    const m = c.maxes[id], est = P.est1RM(m.rm5, UNITS), tgt = P.targetOf(m, UNITS);
+    return `<tr><th>${esc(exMeta(id).name)}${m.pending ? `<div class="pend">New 5RM ${m.pending.rm5} logged → target ${m.pending.suggested}? <button class="btn small primary" data-act="max-approve" data-c="${c.id}" data-ex="${esc(id)}">Approve</button><button class="btn small ghost" data-act="max-dismiss" data-c="${c.id}" data-ex="${esc(id)}">Not yet</button></div>` : ""}</th>
+      <td><input class="in num" data-mx="${c.id}|${esc(id)}|rm5" value="${m.rm5 || ""}" inputmode="decimal" aria-label="${esc(exMeta(id).name)} 5RM"></td>
+      <td class="num sub">${est || "–"}</td>
+      <td><input class="in num" data-mx="${c.id}|${esc(id)}|rm1" value="${m.rm1 || ""}" inputmode="decimal" aria-label="${esc(exMeta(id).name)} tested 1RM"></td>
+      <td><input class="in num tgt" data-mx="${c.id}|${esc(id)}|target" value="${m.target || ""}" placeholder="${tgt || ""}" inputmode="decimal" aria-label="${esc(exMeta(id).name)} target max"></td>
+      <td><button class="icon" data-act="max-rm" data-c="${c.id}" data-ex="${esc(id)}" aria-label="Stop tracking ${esc(exMeta(id).name)}">✕</button></td></tr>`;
+  }).join("");
+  const tracked = new Set(ids);
+  const opts = [...Object.values(LIB), ...Object.values(db.custom)].filter((m) => !tracked.has(m.id)).map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join("");
+  return `<section class="panel"><div class="row"><h2 class="grow">Maxes</h2><span class="sub">lb</span></div>
+    ${rows ? `<table class="maxt"><thead><tr><th>Lift</th><th>5RM</th><th>Est. 1RM</th><th>Tested 1RM</th><th>Target max</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : `<div class="empty">No maxes tracked yet.</div>`}
+    <p class="sub">Percentages in this client’s programs use the <b>target max</b>. Leave it blank to use the tested 1RM, or the estimate (5RM ÷ 0.83, rounded up to 5). New 5RMs the client logs are saved here; a new target waits for your OK.</p>
+    <div class="row"><select class="in" id="mx-add" data-c="${c.id}"><option value="">+ Track a lift…</option>${opts}</select>
+      <select class="in" id="mx-tpl" data-c="${c.id}"><option value="">Apply a max group…</option>${db.maxTemplates.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join("")}</select>
+      ${ids.length ? `<button class="btn small ghost" data-act="mx-save-tpl" data-c="${c.id}">Save these lifts as a group</button>` : ""}</div></section>`;
+}
+
+/* ---- Calendar (completed green, missed red, upcoming white; private coach notes flagged) ---- */
+function scheduledFor(cid) {
+  const out = [];
+  for (const p of programsOf(cid)) {
+    if (p.schedule !== "weekly" || !p.startDate) continue;
+    const cp = P.compile(p);
+    cp.weeks.forEach((wk, w) => wk.days.forEach((day, d) => { if (day.date) out.push({ date: day.date, p, w, d, day }); }));
+  }
+  return out;
+}
+function calendarHTML(c) {
+  const today = todayISO(), ym = UI.calMonth || today.slice(0, 7), [Y, M] = ym.split("-").map(Number);
+  const first = new Date(Y, M - 1, 1), start = new Date(first); start.setDate(1 - ((first.getDay() + 6) % 7));
+  const logs = logsOf(c.id), sched = scheduledFor(c.id), notes = db.dayNotes[c.id] || {};
+  const used = new Set(), cells = [];
+  const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  for (let i = 0; i < 42; i++) {
+    const d = new Date(start); d.setDate(start.getDate() + i); const k = iso(d), inMonth = d.getMonth() === M - 1;
+    if (i >= 35 && !inMonth) break;
+    const items = [];
+    for (const s of sched.filter((x) => x.date === k)) {
+      const l = logs.find((x) => x.prog && x.prog.id === s.p.id && x.prog.w === s.w && x.prog.d === s.d);
+      if (l) used.add(l.id);
+      items.push({ title: `${s.day.name}`, note: s.day.note, status: l ? "done" : k < today ? "missed" : "up", log: l, rx: s.day.items });
+    }
+    for (const l of logs.filter((x) => !used.has(x.id) && x.date.slice(0, 10) === k)) { used.add(l.id); items.push({ title: l.name, status: "done", log: l }); }
+    cells.push(`<div class="cday${inMonth ? "" : " out"}${k === today ? " today" : ""}"><div class="cd-hd"><span>${d.getDate()}</span><button class="flagbtn${notes[k] ? " on" : ""}" data-act="daynote" data-c="${c.id}" data-d="${k}" title="${notes[k] ? esc(notes[k]) : "Add a private note (only coaches see it)"}" aria-label="Private note for ${k}">⚑</button></div>
+      ${items.map((it) => `<div class="cw ${it.status}"><b>${esc(it.title)}</b>${it.note ? `<div class="cwn">${esc(it.note)}</div>` : ""}
+        ${it.log ? (it.log.exercises || []).map((e) => `<div class="cx"><span class="ck ${(e.sets || []).length ? "y" : "n"}">${(e.sets || []).length ? "✓" : "✗"}</span><span>${esc(exMeta(e.ex).name)}<br><span class="sub num">${esc(setsText(e) || "–")}</span></span></div>`).join("")
+          : (it.rx || []).map((x) => `<div class="cx"><span class="ck">${it.status === "missed" ? "✗" : "·"}</span><span>${esc(exMeta(x.ex).name)}</span></div>`).join("")}</div>`).join("")}
+    </div>`);
+  }
+  const label = first.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  return `<section class="panel"><div class="row"><button class="btn small" data-act="cal-move" data-d="-1" aria-label="Previous month">‹</button><h2 class="grow" style="text-align:center">${label}</h2><button class="btn small" data-act="cal-move" data-d="1" aria-label="Next month">›</button><button class="btn small ghost" data-act="cal-today">Today</button></div>
+    <div class="cal-key sub"><span class="cw done">Completed</span><span class="cw missed">Missed</span><span class="cw up">Upcoming</span><span>⚑ private coach note</span></div>
+    <div class="cal">${["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((x) => `<div class="cdow">${x}</div>`).join("")}${cells.join("")}</div></section>`;
+}
+
 function renderClient(cid) {
   setNav("clients");
-  const c = client(cid), logs = db.logs.filter((l) => l.clientId === cid).sort((a, b) => (a.date < b.date ? 1 : -1));
-  const feed = logs.map((l) => `<article class="panel wcard"><div class="hd"><b>${esc(l.name)}</b><span class="sub">${dateLabel(l.date)}${l.minutes ? ` · ${l.minutes} min` : ""}</span></div>
-      ${l.note ? `<div class="cnote">“${esc(l.note)}”</div>` : ""}
-      ${l.exercises.map((e) => `<div class="wex"><span><b>${esc(exMeta(e.ex).name)}</b><br><span class="rx">${esc(e.rx || "")}</span></span><span class="num">${esc(setsText(e))}${e.note ? `<div class="cnote" style="margin-top:6px">“${esc(e.note)}”</div>` : ""}</span></div>`).join("")}
-    </article>`).join("");
+  const c = client(cid), logs = logsOf(cid), tab = UI.clientTab || "calendar";
   const progs = programsOf(cid).map((p) => `<div class="pitem"><div class="grow"><b>${esc(p.name)}</b><div class="sub">${p.weeks} weeks · ${p.days.length} days/week · ${p.schedule === "weekly" ? "scheduled by day" : "any order"} · ${esc(programWeekNow(p) || "")}</div></div>
       <a class="btn small primary" href="#program-${p.id}" style="text-decoration:none">Edit</a><button class="btn small" data-act="prog-dup" data-id="${p.id}">Copy…</button></div>`).join("");
   const dup = UI.confirm && UI.confirm.startsWith("dup:") ? db.programs.find((p) => p.id === UI.confirm.slice(4)) : null;
-  $("#view").innerHTML = `<div class="row"><a href="#clients" class="btn small ghost" style="text-decoration:none">← Clients</a></div>
-    <div class="row"><div class="grow"><div class="eyebrow">${c.remote ? "Remote" : "In person"} · Coach: ${esc((db.coaches.find((x) => x.id === c.coachId) || {}).name || "–")}</div><h1>${esc(c.name)}</h1></div></div>
+  const tpls = db.programs.filter((p) => p.template);
+  $("#view").innerHTML = `<div class="row"><a href="#clients" class="btn small ghost" style="text-decoration:none">← Clients</a><span class="grow"></span>
+      <label class="btn small" for="logfile" role="button" tabindex="0">Load workouts file from ${esc(c.name.replace(/^Sample client: /, ""))}</label><input type="file" id="logfile" data-c="${cid}" accept=".json,application/json" hidden></div>
+    <div class="row"><div class="grow"><div class="eyebrow">${c.remote ? "Remote" : "In person"} · Main coach: ${esc((db.coaches.find((x) => x.id === c.coachId) || {}).name || "–")}</div><h1>${esc(c.name)}</h1></div></div>
     <div class="cols">
-      <section class="feed"><h2>Recent workouts</h2>${feed || `<div class="empty">No workouts logged yet. Once accounts are live, every workout ${esc(c.name)} finishes shows up here with their notes.</div>`}</section>
+      <section class="feed"><div class="row"><div class="seg" role="tablist"><button role="tab" data-act="ctab" data-t="calendar" aria-selected="${tab === "calendar"}">Calendar</button><button role="tab" data-act="ctab" data-t="feed" aria-selected="${tab === "feed"}">Recent workouts</button></div></div>
+        ${tab === "calendar" ? calendarHTML(c) : logs.map((l) => logCardHTML(l)).join("") || `<div class="empty">No workouts logged yet. Once accounts are live, every workout ${esc(c.name)} finishes shows up here with their notes. Until then, load the file they send from the app (Profile → Send my workouts to my coach).</div>`}</section>
       <aside style="display:flex;flex-direction:column;gap:18px">
+        ${maxesCardHTML(c)}
         <section class="panel"><h2>Programs</h2><div class="plist">${progs || `<div class="empty">No program yet.</div>`}</div>
-          ${dup ? `<div class="panel" style="background:var(--sunken)"><b>Copy “${esc(dup.name)}” to:</b><select class="in" id="dup-to">${db.clients.map((x) => `<option value="${x.id}" ${x.id === cid ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select><div class="row"><button class="btn small primary" data-act="dup-yes" data-id="${dup.id}">Make a copy</button><button class="btn small ghost" data-act="cancel">Cancel</button></div></div>` : ""}
-          <button class="btn" data-act="prog-new" data-c="${cid}">+ New program</button></section>
+          ${dup ? `<div class="panel" style="background:var(--sunken)"><b>Copy “${esc(dup.name)}” to:</b><select class="in" id="dup-to">${db.clients.map((x) => `<option value="${x.id}" ${x.id === cid ? "selected" : ""}>${esc(x.name)}</option>`).join("")}<option value="__tpl">Saved programs (template)</option></select><div class="row"><button class="btn small primary" data-act="dup-yes" data-id="${dup.id}">Make a copy</button><button class="btn small ghost" data-act="cancel">Cancel</button></div></div>` : ""}
+          <div class="row"><button class="btn" data-act="prog-new" data-c="${cid}">+ New program</button>${tpls.length ? `<select class="in" id="from-tpl" data-c="${cid}"><option value="">Start from a saved program…</option>${tpls.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join("")}</select>` : ""}</div></section>
         <section class="panel"><h2>Coach notes</h2><textarea class="in" id="cnotes" data-c="${cid}" rows="5" placeholder="Injuries, goals, anything other coaches should know. Clients don’t see this.">${esc(c.notes || "")}</textarea></section>
       </aside>
     </div>`;
+}
+
+/* ---- Everyone's workouts ---- */
+function renderFeed() {
+  setNav("feed");
+  const only = UI.feedFlagged, logs = [...db.logs].sort((a, b) => (a.date < b.date ? 1 : -1)).filter((l) => !only || logFlags(l).any).slice(0, 100);
+  const pend = db.clients.flatMap((c) => Object.entries(c.maxes || {}).filter(([, m]) => m.pending).map(([id, m]) => ({ c, id, m })));
+  $("#view").innerHTML = `<div class="row"><div class="grow"><div class="eyebrow">Every client, newest first</div><h1>Feed</h1></div>
+      <label class="f" style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="feed-flag" ${only ? "checked" : ""}> Only PRs, missed reps and pain</label></div>
+    ${pend.length ? `<section class="panel"><h2>Target maxes to review</h2>${pend.map(({ c, id, m }) => `<div class="row"><span class="grow"><a href="#client-${c.id}"><b>${esc(c.name)}</b></a> · ${esc(exMeta(id).name)}: new 5RM ${m.pending.rm5} → suggested target ${m.pending.suggested}${(c.maxes[id] || {}).target ? ` (now ${(c.maxes[id] || {}).target})` : ""}</span><button class="btn small primary" data-act="max-approve" data-c="${c.id}" data-ex="${esc(id)}">Approve</button><button class="btn small ghost" data-act="max-dismiss" data-c="${c.id}" data-ex="${esc(id)}">Not yet</button></div>`).join("")}</section>` : ""}
+    <div class="feed" style="max-width:900px">${logs.map((l) => logCardHTML(l, true)).join("") || `<div class="empty">${only ? "Nothing flagged." : "No workouts yet."}</div>`}</div>`;
+}
+
+/* ---- Saved programs (templates) ---- */
+function renderTemplates() {
+  setNav("templates");
+  const t = db.programs.filter((p) => p.template);
+  $("#view").innerHTML = `<div class="row"><div class="grow"><div class="eyebrow">Reusable programs you can copy to any client</div><h1>Saved programs</h1></div><button class="btn primary" data-act="tpl-new">+ New saved program</button></div>
+    <div class="plist">${t.map((p) => `<div class="pitem panel" style="flex-direction:row"><div class="grow"><b>${esc(p.name)}</b><div class="sub">${p.weeks} weeks · ${p.days.length} days/week</div></div><a class="btn small primary" href="#program-${p.id}" style="text-decoration:none">Edit</a><button class="btn small" data-act="prog-dup" data-id="${p.id}">Copy to a client…</button></div>`).join("") || `<div class="empty">No saved programs yet. Open any client’s program and choose <b>Save as a saved program</b>, or start a new one here.</div>`}</div>
+    ${UI.confirm && UI.confirm.startsWith("dup:") ? (() => { const dup = prog(UI.confirm.slice(4)); return `<div class="panel"><b>Copy “${esc(dup.name)}” to:</b><select class="in" id="dup-to">${db.clients.map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join("")}</select><div class="row"><button class="btn small primary" data-act="dup-yes" data-id="${dup.id}">Make a copy</button><button class="btn small ghost" data-act="cancel">Cancel</button></div></div>`; })() : ""}`;
 }
 
 function newProgram(cid) {
@@ -145,11 +266,15 @@ function groupLabels(blocks) {
     out.push(e > s ? { label: g + (i - s + 1), start: i === s, kind: e - s >= 2 ? "Circuit" : "Superset" } : null);
   } return out;
 }
-function cellPreview(text) {
-  if (!String(text || "").trim()) return `<div class="pv">–</div>`;
-  const r = P.parsePrescription(text);
-  if (r.errors.length) return `<div class="pv err">Not understood: ${esc(r.errors.join(" · "))}</div>`;
-  return `<div class="pv">${esc(P.prescriptionText(r))}</div>`;
+function cellPreview(text, ex, p) {
+  const t = String(text || "").trim();
+  if (!t) return `<div class="pv">–</div>`;
+  if (/^(skip|off|none|n\/a|-+|—)$/i.test(t)) return `<div class="pv">Not this week</div>`;
+  const r = P.parsePrescription(t), c = p && client(p.clientId), m = c && ex ? P.targetOf(c.maxes[ex], UNITS) : 0;
+  const wts = m ? r.groups.filter((g) => g.load && g.load.t === "pct").map((g) => `${g.load.v}% = ${P.pctOf(m, g.load.v, UNITS)}`) : [];
+  const logs = r.groups.length ? `logs ${r.groups.reduce((n, g) => n + g.sets, 0)} set${r.groups.reduce((n, g) => n + g.sets, 0) === 1 ? "" : "s"}` : "logs 1 set";
+  if (r.errors.length || r.loose) return `<div class="pv">Shown as written · ${logs}${wts.length ? " · " + wts.join(", ") + " lb" : ""}</div>`;
+  return `<div class="pv">${esc(P.prescriptionText(r))}${wts.length ? ` <b>(${wts.join(", ")} lb)</b>` : ""}</div>`;
 }
 function weekRange(p, w) {
   if (p.schedule !== "weekly" || !p.startDate) return "";
@@ -162,14 +287,14 @@ function previewHTML(p, day) {
   if (pday) {
     const gl = groupLabels(pday.items);
     preview = `<div class="pview"><div class="row"><b style="font-family:var(--display);font-size:22px;text-transform:uppercase">Week ${pw + 1} · ${esc(pday.name)}</b>${pday.date ? `<span class="pill">${dateLabel(pday.date)}</span>` : ""}</div>
-      ${pday.note ? `<div class="cnote">${esc(pday.note)}</div>` : ""}${pday.warmup ? `<div class="cnote"><b>Warm-up:</b> ${esc(pday.warmup)}</div>` : ""}
-      ${pday.items.map((it, i) => `${gl[i] && gl[i].start ? `<div class="grp">${gl[i].kind} · no rest between · ${it.group && pday.items.filter((x) => x.group === it.group).slice(-1)[0].rest ? "rest " + mmss(pday.items.filter((x) => x.group === it.group).slice(-1)[0].rest) + " after each round" : ""}</div>` : ""}<div class="pex">${gl[i] ? `<span class="glabel">${gl[i].label}</span> ` : ""}<b>${esc(exMeta(it.ex).name)}</b><div>${esc(P.prescriptionText(it))}${it.rest && !gl[i] ? ` · rest ${mmss(it.rest)}` : ""}</div>${it.format ? `<div class="sub">${esc(P.formatText(it.format))}</div>` : ""}${it.note ? `<div class="sub">${esc(it.note)}</div>` : ""}<div class="sub">Client records: ${fieldsText(it.fields || defaultFields(it.ex))}${it.warmupSets ? " · warm-up sets added" : ""}</div></div>`).join("")}</div>`;
+      ${pday.note ? `<div class="cnote">${P.richText(pday.note)}</div>` : ""}${pday.warmup ? `<div class="cnote"><b>Warm-up:</b> ${P.richText(pday.warmup)}</div>` : ""}
+      ${pday.items.map((it, i) => `${gl[i] && gl[i].start ? `<div class="grp">${gl[i].kind} · no rest between · ${it.group && pday.items.filter((x) => x.group === it.group).slice(-1)[0].rest ? "rest " + mmss(pday.items.filter((x) => x.group === it.group).slice(-1)[0].rest) + " after each round" : ""}</div>` : ""}<div class="pex">${gl[i] ? `<span class="glabel">${gl[i].label}</span> ` : ""}<b>${esc(exMeta(it.ex).name)}</b><div>${P.richText(P.prescriptionText(it))}${(() => { const c = client(p.clientId), m = c ? P.targetOf(c.maxes[it.ex], UNITS) : 0, w = m ? it.groups.filter((g) => g.load && g.load.t === "pct").map((g) => P.pctOf(m, g.load.v, UNITS) + " lb") : []; return w.length ? ` <span class="sub">(${w.join(", ")})</span>` : ""; })()}${it.rest && !gl[i] ? ` · rest ${mmss(it.rest)}` : ""}</div>${it.format ? `<div class="sub">${esc(P.formatText(it.format))}</div>` : ""}${it.note ? `<div class="sub">${P.richText(it.note)}</div>` : ""}<div class="sub">Client records: ${fieldsText(it.fields || defaultFields(it.ex))}${it.warmupSets ? " · warm-up sets added" : ""}</div></div>`).join("")}${pday.cooldown ? `<div class="cnote"><b>Cool-down:</b> ${P.richText(pday.cooldown)}</div>` : ""}</div>`;
   }
   return preview;
 }
 function renderProgram(pid) {
   setNav("clients");
-  const p = prog(pid), c = client(p.clientId);
+  const p = prog(pid), c = client(p.clientId) || null;
   if (UI.day >= p.days.length) UI.day = 0;
   const day = p.days[UI.day];
   const tabs = p.days.map((d, i) => `<button class="dtab" data-act="day" data-i="${i}" aria-pressed="${i === UI.day}">${p.schedule === "weekly" && d.weekday != null ? `<small>${P.WEEKDAYS[d.weekday].slice(0, 3)}</small>` : `<small>Day ${i + 1}</small>`}${esc(d.name)}</button>`).join("");
@@ -181,11 +306,13 @@ function renderProgram(pid) {
     return `<tr class="${lab && lab.start ? "group-start" : ""}"><td class="exh"><div class="exname">${lab ? `<span class="glabel" title="${lab.kind}">${lab.label}</span>` : ""}<button class="nm" data-act="ex-settings" data-b="${bi}" title="Exercise settings">${esc(m.name)}</button></div>
         <div class="meta">${esc(meta)}</div>
         <div class="rowtools"><button class="btn small" data-act="ex-settings" data-b="${bi}">Settings</button><button class="icon" data-act="b-up" data-b="${bi}" aria-label="Move up" ${bi === 0 ? "disabled" : ""}>▲</button><button class="icon" data-act="b-down" data-b="${bi}" aria-label="Move down" ${bi === day.blocks.length - 1 ? "disabled" : ""}>▼</button><button class="icon" data-act="b-rm" data-b="${bi}" aria-label="Remove ${esc(m.name)}">✕</button></div></td>
-      ${Array.from({ length: p.weeks }, (_, w) => { const v = (b.weeks || [])[w] || ""; return `<td class="cell${v.trim() ? "" : " off"}"><textarea data-cell="${bi}:${w}" aria-label="${esc(m.name)}, week ${w + 1}" placeholder="e.g. 3x5 @75%">${esc(v)}</textarea>${cellPreview(v)}</td>`; }).join("")}</tr>`;
+      ${Array.from({ length: p.weeks }, (_, w) => { const v = (b.weeks || [])[w] || ""; return `<td class="cell${v.trim() ? "" : " off"}"><textarea data-cell="${bi}:${w}" aria-label="${esc(m.name)}, week ${w + 1}" placeholder="e.g. 3x5 @75%">${esc(v)}</textarea>${cellPreview(v, b.ex, p)}</td>`; }).join("")}</tr>`;
   }).join("") : "";
   const pw = Math.min(UI.previewWeek, p.weeks - 1), preview = previewHTML(p, day);
-  $("#view").innerHTML = `<div class="row"><a href="#client-${c.id}" class="btn small ghost" style="text-decoration:none">← ${esc(c.name)}</a><span class="grow"></span><span class="sub" id="saved">Saved in this browser</span>
-      <button class="btn small" data-act="download">Download for the client app</button></div>
+  $("#view").innerHTML = `<div class="row">${c ? `<a href="#client-${c.id}" class="btn small ghost" style="text-decoration:none">← ${esc(c.name)}</a>` : `<a href="#templates" class="btn small ghost" style="text-decoration:none">← Saved programs</a><span class="pill accent">Saved program</span>`}<span class="grow"></span><span class="sub" id="saved">Saved in this browser</span>
+      ${c ? `<button class="btn small" data-act="save-tpl">Save as a saved program</button><button class="btn small" data-act="download">Download for the client app</button>` : `<button class="btn small" data-act="prog-dup" data-id="${p.id}">Copy to a client…</button>`}</div>
+    ${UI.confirm && UI.confirm.startsWith("dup:") ? `<div class="panel"><b>Copy “${esc(p.name)}” to:</b><select class="in" id="dup-to">${db.clients.map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join("")}</select><div class="row"><button class="btn small primary" data-act="dup-yes" data-id="${p.id}">Make a copy</button><button class="btn small ghost" data-act="cancel">Cancel</button></div></div>` : ""}
+    ${UI.confirm === "day-copy" ? `<div class="panel"><b>Copy “${esc(day.name)}” (all weeks) into:</b><select class="in" id="daycopy-to">${db.programs.filter((x) => x.id !== p.id).map((x) => `<option value="${x.id}">${esc(x.template ? "Saved: " + x.name : (client(x.clientId) || {}).name + ": " + x.name)}</option>`).join("")}</select><div class="row"><button class="btn small primary" data-act="day-copy-yes">Copy day</button><button class="btn small ghost" data-act="cancel">Cancel</button></div></div>` : ""}
     <section class="panel"><div class="ptop">
       <label class="f">Program name<input class="in name" id="p-name" value="${esc(p.name)}"></label>
       <label class="f">Weeks<input class="in" id="p-weeks" type="number" min="1" max="16" value="${p.weeks}"></label>
@@ -196,9 +323,12 @@ function renderProgram(pid) {
     ${day ? `<section class="panel"><div class="dayset">
         <label class="f">Day name<input class="in" id="d-name" value="${esc(day.name)}"></label>
         <label class="f">Day of week<select class="in" id="d-wd" ${p.schedule === "weekly" ? "" : "disabled"}><option value="">–</option>${P.WEEKDAYS.map((n, i) => `<option value="${i}" ${day.weekday === i ? "selected" : ""}>${n}</option>`).join("")}</select></label>
-        <label class="f">Note for this day<input class="in" id="d-note" value="${esc(day.note || "")}" placeholder="Shown at the top of the workout"></label>
-        <label class="f">Warm-up (for remote clients)<input class="in" id="d-warm" value="${esc(day.warmup || "")}" placeholder="e.g. 5 min bike, 2 rounds of…"></label>
-        ${UI.confirm === "day-rm" ? `<span class="row"><button class="btn small danger" data-act="day-rm-yes">Delete day</button><button class="btn small ghost" data-act="cancel">Keep</button></span>` : `<button class="btn small ghost danger" data-act="day-rm">Delete day</button>`}
+        <span class="row" style="justify-content:flex-end"><button class="btn small" data-act="day-copy" ${db.programs.length > 1 ? "" : "disabled"}>Copy day to…</button>${UI.confirm === "day-rm" ? `<button class="btn small danger" data-act="day-rm-yes">Delete day</button><button class="btn small ghost" data-act="cancel">Keep</button>` : `<button class="btn small ghost danger" data-act="day-rm">Delete day</button>`}</span>
+      </div>
+      <div class="form3">
+        <label class="f">Coaching notes for this day (clients see this at the top; **bold**)<textarea class="in" id="d-note" rows="3" placeholder="e.g. Think Lil Jon and **get LOW**!">${esc(day.note || "")}</textarea></label>
+        <label class="f">Warm-up<textarea class="in" id="d-warm" rows="3" placeholder="e.g. 5 min bike, 2 rounds of…">${esc(day.warmup || "")}</textarea></label>
+        <label class="f">Cool-down<textarea class="in" id="d-cool" rows="3" placeholder="e.g. Couch stretch 2 x 30s each side">${esc(day.cooldown || "")}</textarea></label>
       </div></section>
       <div class="gridwrap"><table class="grid"><thead>${head}</thead><tbody>${rows}<tr class="addrow"><td class="exh"><button class="btn primary" data-act="b-add">+ Add exercise</button></td><td colspan="${p.weeks}" class="sub" style="padding:12px">Type each week’s sets in the cells. Empty cell = not this week.</td></tr></tbody></table></div>
       <div class="cols">
@@ -213,7 +343,11 @@ function renderProgram(pid) {
           <dt><code>4x40yd @200</code></dt><dd>distance (yd, m, ft) with a weight</dd>
           <dt><code>AMRAP 60s @200</code></dt><dd>max reps in a time window</dd>
           <dt><code>tempo 3-1-1</code> <code>pause 2s</code></dt><dd>tempo or pause for that week</dd>
-        </dl><p class="sub">Supersets, circuits, EMOMs, intervals, rest, what the client records (weight, reps, time, distance, height), warm-up sets and video links are in each exercise’s <b>Settings</b>.</p></section>
+          <dt><code>2x3 @90% of top</code></dt><dd>back-offs from the heaviest set the client logs first (“build to a heavy triple, then…” works)</dd>
+          <dt><code>3x8/side</code></dt><dd>per side, leg or arm</dd>
+          <dt><code>skip</code></dt><dd>not this week</dd>
+          <dt>anything else</dt><dd>shown to the client word for word</dd>
+        </dl><p class="sub">Percentages use each client’s target max and round up to the nearest 5 lb.</p><p class="sub">Supersets, circuits, EMOMs, intervals, rest, what the client records (weight, reps, time, distance, height), warm-up sets and video links are in each exercise’s <b>Settings</b>.</p></section>
       </div>` : `<div class="empty">Add a day to start.</div>`}`;
 }
 
@@ -249,7 +383,7 @@ function settingsHTML(p, b) {
     <div class="form2">
       <label class="f">Superset / circuit letter<input class="in" id="s-group" maxlength="2" value="${esc(b.group || "")}" placeholder="e.g. A (same letter on neighbors)"></label>
       <label class="f">Rest after ${b.group ? "each round" : "each set"} (m:ss)<input class="in" id="s-rest" value="${b.rest ? mmss(b.rest).replace(/^(\d+)s$/, "0:$1") : ""}" placeholder="e.g. 2:00"></label>
-      <label class="f" style="grid-column:1/-1">Note for every week<input class="in" id="s-note" value="${esc(b.note || "")}" placeholder="Coaching cue shown to the client"></label>
+      <label class="f" style="grid-column:1/-1">Coaching cues for every week (clients see this; **bold** works)<textarea class="in" id="s-note" rows="3" placeholder="e.g. 3 count pause on your chest. **Big drive** up and out of the bottom.">${esc(b.note || "")}</textarea></label>
       <label class="f" style="grid-column:1/-1">Video link (YouTube)<input class="in" id="s-video" value="${esc(b.video || "")}" placeholder="https://youtu.be/… — plays in the client’s exercise guide"></label>
     </div>
     <div class="fields"><span class="sub">Client records:</span>${Object.entries(LIBR.FIELD_NAMES).map(([k, n]) => `<label><input type="checkbox" class="s-f" value="${k}" ${f.includes(k) ? "checked" : ""}> ${n}</label>`).join("")}</div>
@@ -278,7 +412,25 @@ document.addEventListener("click", (ev) => {
     case "reset-sample": db = seed(); save(); UI.confirm = null; renderTop(); route(); toast("Sample data reset."); break;
     case "prog-new": { const np = newProgram(t.dataset.c); UI.day = 0; location.hash = "#program-" + np.id; break; }
     case "prog-dup": UI.confirm = "dup:" + t.dataset.id; route(); break;
-    case "dup-yes": { const src = prog(t.dataset.id), np = clone(src); np.id = uid("p"); np.clientId = $("#dup-to").value; np.name = src.name + " (copy)"; db.programs.push(np); save(); UI.confirm = null; location.hash = "#program-" + np.id; toast(`Copied to ${client(np.clientId).name}.`); break; }
+    case "dup-yes": {
+      const src = prog(t.dataset.id), np = clone(src), to = $("#dup-to").value; np.id = uid("p"); np.coach = me().name;
+      if (to === "__tpl") { np.clientId = null; np.template = true; np.name = src.name; } else { np.clientId = to; np.template = false; np.name = src.template ? src.name : src.name + " (copy)"; }
+      db.programs.push(np); save(); UI.confirm = null; location.hash = "#program-" + np.id; toast(to === "__tpl" ? "Saved to Saved programs." : `Copied to ${client(np.clientId).name}. Set the start date and adjust anything for them.`); break;
+    }
+    case "save-tpl": { const np = clone(p); np.id = uid("p"); np.clientId = null; np.template = true; db.programs.push(np); save(); route(); toast(`“${p.name}” added to Saved programs.`); break; }
+    case "tpl-new": { const np = newProgram(null); np.template = true; np.name = "New saved program"; save(); UI.day = 0; location.hash = "#program-" + np.id; break; }
+    case "day-copy": UI.confirm = "day-copy"; route(); break;
+    case "day-copy-yes": { const dest = prog($("#daycopy-to").value); if (!dest) break; const nd = clone(day); nd.id = uid("d"); nd.blocks.forEach((b) => { b.id = uid("b"); b.weeks = (b.weeks || []).slice(0, dest.weeks); while (b.weeks.length < dest.weeks) b.weeks.push(""); }); dest.days.push(nd); save(); UI.confirm = null; route(); toast(`Copied ${day.name} into “${dest.name}”.`); break; }
+    case "ctab": UI.clientTab = t.dataset.t; route(); break;
+    case "cal-move": { const [y, m] = (UI.calMonth || todayISO().slice(0, 7)).split("-").map(Number), d = new Date(y, m - 1 + +t.dataset.d, 1); UI.calMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; route(); break; }
+    case "cal-today": UI.calMonth = null; route(); break;
+    case "daynote": { const cid = t.dataset.c, d = t.dataset.d, cur = (db.dayNotes[cid] || {})[d] || "";
+      openModal(`<div class="row"><h2 class="grow">Private note · ${dateLabel(d)}</h2><button class="btn small ghost" data-act="modal-close">Close</button></div><p class="sub">Only coaches see this. The client never does.</p><textarea class="in" id="dn-text" rows="5" data-c="${cid}" data-d="${d}" placeholder="e.g. Check in about the knee; deload if it’s still sore.">${esc(cur)}</textarea><div class="row"><button class="btn primary" data-act="dn-save">Save</button>${cur ? `<button class="btn ghost danger" data-act="dn-del">Delete note</button>` : ""}</div>`); setTimeout(() => $("#dn-text")?.focus(), 30); break; }
+    case "dn-save": case "dn-del": { const ta = $("#dn-text"), cid = ta.dataset.c, d = ta.dataset.d, v = a === "dn-del" ? "" : ta.value.trim(); db.dayNotes[cid] = db.dayNotes[cid] || {}; if (v) db.dayNotes[cid][d] = v; else delete db.dayNotes[cid][d]; save(); closeModal(); route(); break; }
+    case "max-approve": { const c = client(t.dataset.c), m = c.maxes[t.dataset.ex]; if (m && m.pending) { m.target = m.pending.suggested; m.rm5 = Math.max(m.rm5 || 0, m.pending.rm5); delete m.pending; save(); route(); toast(`${exMeta(t.dataset.ex).name} target max is now ${m.target}. Download the program again for ${c.name}.`); } break; }
+    case "max-dismiss": { const c = client(t.dataset.c), m = c.maxes[t.dataset.ex]; if (m) { delete m.pending; save(); route(); } break; }
+    case "max-rm": { const c = client(t.dataset.c); delete c.maxes[t.dataset.ex]; save(); route(); break; }
+    case "mx-save-tpl": { const c = client(t.dataset.c), name = prompt("Name this group of maxes", "Group " + (db.maxTemplates.length + 1)); if (name) { db.maxTemplates.push({ id: uid("mt"), name: name.slice(0, 60), lifts: Object.keys(c.maxes) }); save(); route(); toast("Max group saved."); } break; }
     case "day": UI.day = +t.dataset.i; UI.confirm = null; route(); break;
     case "day-add": p.days.push({ id: uid("d"), name: `Day ${p.days.length + 1}`, weekday: null, note: "", warmup: "", blocks: [] }); UI.day = p.days.length - 1; save(); route(); break;
     case "day-rm": UI.confirm = "day-rm"; route(); break;
@@ -307,7 +459,10 @@ document.addEventListener("click", (ev) => {
       break;
     }
     case "download": {
-      const blob = new Blob([JSON.stringify(p, null, 1)], { type: "application/json" }), url = URL.createObjectURL(blob);
+      const c = client(p.clientId), used = new Set(p.days.flatMap((d) => d.blocks.map((b) => b.ex)));
+      const out = { ...clone(p), maxes: c ? clone(c.maxes) : {}, exercises: Object.fromEntries(Object.entries(db.custom).filter(([id]) => used.has(id))) };
+      for (const m of Object.values(out.maxes)) delete m.pending;
+      const blob = new Blob([JSON.stringify(out, null, 1)], { type: "application/json" }), url = URL.createObjectURL(blob);
       const el = document.createElement("a"); el.href = url; el.download = `${p.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.json`; document.body.appendChild(el); el.click(); el.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
       toast("Saved. In the client app: Profile → Load a program file."); break;
     }
@@ -318,14 +473,14 @@ document.addEventListener("input", (ev) => {
   if (t.dataset.cell && p) {
     const [bi, w] = t.dataset.cell.split(":").map(Number), b = p.days[UI.day].blocks[bi];
     b.weeks = b.weeks || []; b.weeks[w] = t.value; save();
-    t.parentElement.querySelector(".pv").outerHTML = cellPreview(t.value);
+    t.parentElement.querySelector(".pv").outerHTML = cellPreview(t.value, b.ex, p);
     t.parentElement.classList.toggle("off", !t.value.trim());
     return;
   }
   if (t.id === "pick-q" && UI.picker) { UI.picker.q = t.value; $("#pick-list").innerHTML = pickerHTML(t.value); return; }
   if (t.id === "cnotes") { client(t.dataset.c).notes = t.value; save(); return; }
-  if (p && ["p-name", "d-name", "d-note", "d-warm"].includes(t.id)) {
-    if (t.id === "p-name") p.name = t.value; else p.days[UI.day][{ "d-name": "name", "d-note": "note", "d-warm": "warmup" }[t.id]] = t.value;
+  if (p && ["p-name", "d-name", "d-note", "d-warm", "d-cool"].includes(t.id)) {
+    if (t.id === "p-name") p.name = t.value; else p.days[UI.day][{ "d-name": "name", "d-note": "note", "d-warm": "warmup", "d-cool": "cooldown" }[t.id]] = t.value;
     save(); if (t.id === "d-name") document.querySelector(`.dtab[aria-pressed="true"]`).lastChild.textContent = t.value; return;
   }
   if (UI.editing != null && p && ["s-group", "s-rest", "s-note", "s-video", "s-every", "s-rounds", "s-work", "s-irest"].includes(t.id)) applySettings(p);
@@ -333,6 +488,25 @@ document.addEventListener("input", (ev) => {
 document.addEventListener("change", (ev) => {
   const t = ev.target, p = cur() ? prog(cur()) : null;
   if (t.id === "me") { db.me = t.value; save(); route(); return; }
+  if (t.dataset.mx) { const [cid, ex, f] = t.dataset.mx.split("|"), c = client(cid), v = parseFloat(t.value); c.maxes[ex] = c.maxes[ex] || {}; if (isFinite(v) && v > 0) c.maxes[ex][f] = v; else delete c.maxes[ex][f]; save(); route(); return; }
+  if (t.id === "mx-add" && t.value) { client(t.dataset.c).maxes[t.value] = {}; save(); route(); return; }
+  if (t.id === "mx-tpl" && t.value) { const c = client(t.dataset.c), tp = db.maxTemplates.find((x) => x.id === t.value); for (const id of tp.lifts) c.maxes[id] = c.maxes[id] || {}; save(); route(); return; }
+  if (t.id === "from-tpl" && t.value) { const src = prog(t.value), np = clone(src); np.id = uid("p"); np.clientId = t.dataset.c; np.template = false; np.coach = me().name; db.programs.push(np); save(); UI.day = 0; location.hash = "#program-" + np.id; toast("Copied. Set the start date and adjust anything for this client."); return; }
+  if (t.id === "feed-flag") { UI.feedFlagged = t.checked; route(); return; }
+  if (t.id === "logfile") {
+    const f = t.files && t.files[0], cid = t.dataset.c; if (!f) return;
+    f.text().then((txt) => {
+      const d = JSON.parse(txt); if (!d || d.app !== "powerplant-log" || !Array.isArray(d.workouts)) throw new Error("bad");
+      const have = new Set(db.logs.map((l) => l.id)), c = client(cid); let n = 0, maxes = 0;
+      for (const w of d.workouts) {
+        if (have.has(w.id)) continue; n++;
+        db.logs.push({ ...w, clientId: cid, exercises: (w.exercises || []).map((e) => ({ ...e, sets: e.sets || [] })) });
+        for (const m of w.maxes || []) { const cur = c.maxes[m.ex] = c.maxes[m.ex] || {}; if (!(cur.rm5 >= m.rm5)) { const before = P.targetOf(cur, UNITS); if (!cur.target && before) cur.target = before; /* the program keeps its weights until a coach approves */ cur.rm5 = m.rm5; if (m.suggested > P.targetOf(cur, UNITS) || !cur.target) cur.pending = { rm5: m.rm5, suggested: m.suggested, at: w.date }; maxes++; } }
+      }
+      save(); route(); toast(n ? `Loaded ${n} new workout${n === 1 ? "" : "s"}${maxes ? ` and ${maxes} new 5RM${maxes === 1 ? "" : "s"} to review` : ""}.` : "Nothing new in that file.");
+    }).catch(() => toast("That isn’t a workouts file from the Power Plant app."));
+    return;
+  }
   if (UI.editing != null && p && (t.classList.contains("s-f") || ["s-fmt", "s-warm"].includes(t.id))) { applySettings(p); if (t.id === "s-fmt") openSettings(UI.editing); return; }
   if (!p) return;
   if (t.id === "p-weeks") { const n = Math.max(1, Math.min(16, Math.round(+t.value || 1))); p.weeks = n; for (const d of p.days) for (const b of d.blocks) { b.weeks = b.weeks || []; while (b.weeks.length < n) b.weeks.push(""); } save(); route(); }
@@ -340,7 +514,7 @@ document.addEventListener("change", (ev) => {
   else if (t.id === "p-start") { p.startDate = t.value; save(); route(); }
   else if (t.id === "d-wd") { p.days[UI.day].weekday = t.value === "" ? null : +t.value; save(); route(); }
   else if (t.id === "pv-week") { UI.previewWeek = +t.value; route(); }
-  else if (t.dataset.cell || ["d-note", "d-warm", "p-name"].includes(t.id)) { const pv = $("#pv"); if (pv) pv.innerHTML = previewHTML(p, p.days[UI.day]); } // refresh only the client preview, keep focus
+  else if (t.dataset.cell || ["d-note", "d-warm", "d-cool", "p-name"].includes(t.id)) { const pv = $("#pv"); if (pv) pv.innerHTML = previewHTML(p, p.days[UI.day]); } // refresh only the client preview, keep focus
 });
 function applySettings(p) {
   const b = p.days[UI.day].blocks[UI.editing]; if (!b) return;
