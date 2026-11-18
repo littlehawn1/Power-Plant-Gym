@@ -24,8 +24,10 @@ create table if not exists public.profiles (
   email       text not null default '',
   units       text not null default 'lb' check (units in ('lb', 'kg')),
   coach_id    uuid references public.profiles (id) on delete set null,  -- the client's main coach
+  remote      boolean not null default false,                           -- trains remotely rather than in person
   created_at  timestamptz not null default now()
 );
+alter table public.profiles add column if not exists remote boolean not null default false;  -- for databases set up before it existed
 
 -- Is the person making this request a coach? (used by every policy below)
 create or replace function public.is_coach() returns boolean
@@ -132,6 +134,13 @@ create table if not exists public.client_notes (
   updated_at  timestamptz not null default now()
 );
 
+-- Dashboard settings shared by all coaches: custom exercises and saved groups of maxes.
+create table if not exists public.gym_settings (
+  key         text primary key,
+  data        jsonb not null default '{}'::jsonb,
+  updated_at  timestamptz not null default now()
+);
+
 -- ============================================================
 -- Messages and form-check videos
 -- ============================================================
@@ -164,6 +173,11 @@ alter table public.client_state  enable row level security;
 alter table public.day_notes     enable row level security;
 alter table public.client_notes  enable row level security;
 alter table public.messages      enable row level security;
+alter table public.gym_settings  enable row level security;
+
+-- dashboard settings: coaches only
+drop policy if exists "coaches only" on public.gym_settings;
+create policy "coaches only" on public.gym_settings for all using (public.is_coach()) with check (public.is_coach());
 
 -- coach list: coaches only
 drop policy if exists "coaches manage coach list" on public.coach_emails;
@@ -178,7 +192,7 @@ create policy "edit own profile" on public.profiles for update
   using (id = auth.uid() or public.is_coach()) with check (id = auth.uid() or public.is_coach());
 -- Nobody can make themselves a coach by editing their profile: role changes only via the coach list.
 revoke update on public.profiles from authenticated, anon;
-grant update (name, units, coach_id) on public.profiles to authenticated;
+grant update (name, units, coach_id, remote) on public.profiles to authenticated;
 
 -- programs: coaches do everything; a client reads their own
 drop policy if exists "coaches manage programs" on public.programs;
@@ -229,15 +243,27 @@ revoke update on public.messages from authenticated, anon;
 grant update (read_at) on public.messages to authenticated;
 
 -- A client saves a new 5-rep max. Their 5RM updates; the target only changes when a coach approves.
+-- If the lift had no target yet, the max the program was using is kept as the target, so weights don't jump before the coach's OK.
 create or replace function public.report_5rm(p_ex text, p_rm5 numeric, p_suggested numeric)
 returns void language plpgsql security definer set search_path = public as $$
+declare cur public.client_maxes; eff numeric;
 begin
   if auth.uid() is null then raise exception 'not signed in'; end if;
-  insert into public.client_maxes (client_id, ex, rm5, pending, updated_at)
-  values (auth.uid(), p_ex, p_rm5, jsonb_build_object('rm5', p_rm5, 'suggested', p_suggested, 'at', now()), now())
-  on conflict (client_id, ex) do update
-    set rm5 = excluded.rm5, pending = excluded.pending, updated_at = now()
-    where client_maxes.rm5 is null or excluded.rm5 > client_maxes.rm5;
+  select * into cur from public.client_maxes where client_id = auth.uid() and ex = p_ex for update;
+  if not found then
+    insert into public.client_maxes (client_id, ex, rm5, pending, updated_at)
+    values (auth.uid(), p_ex, p_rm5, jsonb_build_object('rm5', p_rm5, 'suggested', p_suggested, 'at', now()), now())
+    on conflict (client_id, ex) do nothing;
+    return;
+  end if;
+  if cur.rm5 is not null and p_rm5 <= cur.rm5 then return; end if;
+  -- 5RM ÷ 0.83, rounded up to 5 lb: the gym's estimate, same as the apps
+  eff := coalesce(nullif(cur.target, 0), nullif(cur.rm1, 0), case when cur.rm5 > 0 then ceil(cur.rm5 / 0.83 / 5 - 1e-9) * 5 end);
+  update public.client_maxes
+     set rm5 = p_rm5, target = eff, updated_at = now(),
+         pending = case when eff is null or p_suggested > eff
+                        then jsonb_build_object('rm5', p_rm5, 'suggested', p_suggested, 'at', now()) else pending end
+   where client_id = auth.uid() and ex = p_ex;
 end;
 $$;
 revoke execute on function public.report_5rm(text, numeric, numeric) from public, anon;

@@ -9,7 +9,7 @@ There is no AI in this app.
 
 ## Status
 
-Accounts aren't connected yet. Until the gym's Supabase project exists, data is saved on the phone and a clearly labeled **sample program** ("Strength Foundations", 4 weeks × 3 days) stands in for a real one. All program reads go through `program()` and saving finished workouts tags them with `prog: { id, w, d }`, so swapping in the backend is contained.
+Clients sign in with email and password (the "Account + sync" section of `app.js`). The phone keeps a full copy so the app works offline; changes go up to the account about two seconds later, and on start or when the app comes back to the front it pulls the coach's program, the client's maxes and anything changed on another device. A new 5RM is reported with `report_5rm()`, which keeps the current target until a coach approves the new one. Until a coach assigns a program, the labeled **sample program** shows.
 
 ## Program format (what the coach dashboard will produce)
 
