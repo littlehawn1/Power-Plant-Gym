@@ -10,4 +10,4 @@ Software for Power Plant Gym (Aston, PA).
 
 Every push to `main` deploys to GitHub Pages (see `.github/workflows/pages.yml` and `build.sh`). To try it locally: `sh build.sh && cd _site && python3 -m http.server`.
 
-Status: the client app runs on a labeled sample program with data saved on the phone. Accounts, the coach's real programs and syncing arrive when the gym's Supabase project is connected. See `client/README.md` for details.
+Status: both apps are connected to the gym's Supabase project. Clients and coaches sign in with email and password; clients' workouts, settings and 5RMs sync to their account, and coaches see every client, write programs that appear in the client's app, approve target maxes and keep private notes. The database is set up by `supabase/setup.sql` (safe to run again); the shared connection code is `shared/cloud.js`, and `shared/supabase.js` is supabase-js 2.45.4, kept in the repo so the app works offline.

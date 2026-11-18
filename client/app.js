@@ -1,8 +1,8 @@
 /* Power Plant — client app for Power Plant Gym. Workouts come from the coach's program or the client's own routines.
-   Until accounts are live, data (and a sample program) live on this device. */
+   Data lives on the phone and syncs to the client's account in the gym's Supabase project (see "Account + sync"). */
 (() => {
 "use strict";
-const APP_VERSION = "0.4.0";
+const APP_VERSION = "0.5.0";
 const PP = window.PPProgram;
 const APP_NAME = "Power Plant";
 
@@ -180,18 +180,19 @@ function load() {
   S.state = normalize(lsGet("pp1.state"));
   S.workouts = lsGet("pp1.workouts") || [];
   S.days = lsGet("pp1.days") || {};
-  S.program = lsGet("pp1.program") || PPSample.program(); // replaced by the coach's program once accounts are live
+  S.program = lsGet("pp1.program") || PPSample.program(); // replaced by the coach's program after sign-in (pull)
 }
 let saveTimer = null, storageWarned = false;
 function saveState() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => { if (!lsSet("pp1.state", S.state)) warnStorage(); }, 150);
+  stateChanged();
 }
-function saveWorkouts() { if (!lsSet("pp1.workouts", S.workouts)) warnStorage(); }
-function saveDays() { if (!lsSet("pp1.days", S.days)) warnStorage(); }
+function saveWorkouts() { if (!lsSet("pp1.workouts", S.workouts)) warnStorage(); cloudSoon(); }
+function saveDays() { if (!lsSet("pp1.days", S.days)) warnStorage(); stateChanged(); }
 function warnStorage() { if (!storageWarned) { storageWarned = true; toast("Couldn’t save to this device. Make a backup in Setup and free some space."); } }
-window.addEventListener("pagehide", () => { clearTimeout(saveTimer); lsSet("pp1.state", S.state); });
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden" && S.state) { clearTimeout(saveTimer); lsSet("pp1.state", S.state); } });
+window.addEventListener("pagehide", () => { if (CL.leaving) return; clearTimeout(saveTimer); lsSet("pp1.state", S.state); });
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden" && S.state && !CL.leaving) { clearTimeout(saveTimer); lsSet("pp1.state", S.state); } });
 
 /* ================= Exercises ================= */
 function meta(id) { const px = S.program && S.program.exercises && S.program.exercises[id]; return LIB[id] || (S.state.custom[id] ? { track: "wr", ...S.state.custom[id], id } : px ? { track: "wr", sets: 3, repsMin: 5, repsMax: 5, kind: "other", muscle: "Other", ...px, id } : null); }
@@ -802,7 +803,7 @@ function renderSummary() {
   return `${header(`Nice work`, `${esc(sm.name)} done`)}
     ${stats}${maxes}${prs}
     <section class="panel summary"><h2>Results</h2>${lines}</section>
-    ${sm.coach ? `<p class="note">Saved to your program. Once Power Plant accounts are live, your coach sees this workout and your notes automatically.</p>` : ""}
+    ${sm.coach ? `<p class="note">${CL.user ? "Saved to your program. Your coach sees this workout and your notes." : "Saved to your program on this phone. Sign in so your coach sees your workouts."}</p>` : ""}
     <div class="row end"><button class="btn primary" data-act="summary-done">Done</button></div>`;
 }
 
@@ -823,7 +824,7 @@ function renderProgram() {
       </div>`;
     }).join("")}</section>`).join("");
   return `${header(`From ${esc(pr.coach)} · ${finished} of ${total} workouts done`, esc(pr.name))}
-    ${pr.sample ? `<div class="msg action" style="align-self:stretch"><span>This is a sample program so you can try the app. Your coach’s real program will replace it once accounts are live.</span></div>` : ""}
+    ${pr.sample ? `<div class="msg action" style="align-self:stretch"><span>This is a sample program so you can try the app. Your coach’s program replaces it as soon as they assign one to you.</span></div>` : ""}
     <div class="bars" style="grid-template-columns:minmax(0,1fr)"><span class="track"><span class="fill" style="display:block;width:${(finished / total) * 100}%"></span></span></div>
     ${weeks}
     <p class="note"><b>How to read it:</b> “4 × 6” means 4 sets of 6 reps. “75% of max” is a percentage of your one-rep max (set yours in Profile). “RPE 8” means pick a weight that leaves about 2 reps in the tank (10 = nothing left).</p>`;
@@ -1115,9 +1116,12 @@ function renderSetup() {
   const pr = program(); const pctIds = pr ? [...new Set(pr.weeks.flatMap((w) => w.days.flatMap((d) => d.items.filter((it) => (it.load && it.load.t === "pct") || (it.groups || []).some((g) => g.load && g.load.t === "pct")).map((it) => it.ex))))] : [];
   const maxIds = [...new Set([...pctIds, ...Object.keys((S.program && S.program.maxes) || {}), ...Object.keys(st.rm5), ...Object.keys(st.maxes)])].filter((id) => meta(id));
   return `${header(`${APP_NAME} · version ${APP_VERSION}`, "Profile")}
-    <section class="panel"><h2>Coach program</h2><span class="sub">${S.program && S.program.sample ? "You’re using the sample program." : `Using “${esc((program() || {}).name || "")}”.`} Until accounts are live, your coach can send a program file to load here.</span>
-      <div class="row"><label class="btn small" for="progfile" role="button" tabindex="0">Load a program file</label><button class="btn small" data-act="send-coach">Send my workouts to my coach</button><input type="file" id="progfile" accept=".json,application/json" hidden>${S.program && !S.program.sample ? `<button class="btn small ghost" data-act="prog-sample">Go back to the sample</button>` : ""}</div></section>
-    <section class="panel"><h2>Account</h2><span class="sub">Accounts aren’t live yet. For now everything is saved on this phone, and the program shown is a sample. When your coach invites you, you’ll sign in here and your real program and history will sync.</span></section>
+    ${CL.user ? `<section class="panel"><h2>Account</h2><span class="sub">Signed in as <b>${esc(CL.user.email || "")}</b>. Your workouts, settings and maxes save to your account, and your coaches see your workouts and notes.</span>
+      ${CL.failed ? `<span class="note">Some changes haven’t reached your account yet. They’ll go up when you’re back online.</span>` : ""}
+      <div class="row"><button class="btn small ghost" data-act="signout">Sign out</button></div></section>
+    <section class="panel"><h2>Coach program</h2><span class="sub">${S.program && S.program.cloud ? `Your coach’s program: <b>${esc((program() || {}).name || "")}</b>. Changes your coach makes show up here on their own.` : "Your coach hasn’t assigned you a program yet, so the sample program is showing. Your coach’s program appears here as soon as they assign it."}</span></section>`
+    : `<section class="panel"><h2>Coach program</h2><span class="sub">${S.program && S.program.sample ? "You’re using the sample program." : `Using “${esc((program() || {}).name || "")}”.`}</span>
+      <div class="row"><label class="btn small" for="progfile" role="button" tabindex="0">Load a program file</label><button class="btn small" data-act="send-coach">Send my workouts to my coach</button><input type="file" id="progfile" accept=".json,application/json" hidden>${S.program && !S.program.sample ? `<button class="btn small ghost" data-act="prog-sample">Go back to the sample</button>` : ""}</div></section>`}
     ${maxIds.length ? `<section class="panel"><h2>Your maxes (${u})</h2><span class="sub">Percentages in your program are of your <b>target max</b>. A 5-rep max converts to an estimated max with 5RM ÷ 0.83, rounded up to the nearest ${PP.roundStep(u)}. When you log a new 5RM it’s saved here and your coach decides on a new target.</span>
       <div class="maxes"><span class="mh">Lift</span><span class="mh">5RM</span><span class="mh">Target max</span>
       ${maxIds.map((id) => { const c = coachMax(id), cm = PP.targetOf(c, u), r5 = known5RM(id); return `<span class="mn">${esc(getEx(id).name)}</span>
@@ -1136,7 +1140,7 @@ function renderSetup() {
       <div class="field"><label for="rfail">After falling short of the range</label><input id="rfail" type="text" inputmode="numeric" value="${st.restFail}" data-field="restFail"></div>
     </section>
     <section class="panel"><h2>Backup</h2>
-      <span class="sub">Your data is stored only on this device. Save a backup now and then, and before switching phones.</span>
+      <span class="sub">${CL.user ? "Your data is saved to your account. A backup file is an extra copy you can keep." : "Your data is stored only on this device. Save a backup now and then, and before switching phones."}</span>
       <div class="row"><button class="btn" data-act="backup">Save backup file</button><label class="btn ghost" for="restore" role="button" tabindex="0">Restore from backup</label><input type="file" id="restore" accept=".json,application/json" hidden></div>
       ${S.ui.confirm === "restore" ? `<div class="msg action" style="align-self:stretch"><span>Replace everything on this device with the backup from ${esc(S.ui.pendingRestore?.label || "that file")}?</span><button class="btn small ghost" data-act="confirm-no">Cancel</button><button class="btn small danger" data-act="restore-yes">Replace</button></div>` : ""}
       ${S.ui.msg ? `<span class="note">${esc(S.ui.msg)}</span>` : ""}
@@ -1273,6 +1277,7 @@ document.addEventListener("click", async (ev) => {
     case "restore-yes": { const r = S.ui.pendingRestore; if (r) { S.state = r.state; S.workouts = r.workouts; S.days = r.days; if (r.program) { S.program = r.program; lsSet("pp1.program", S.program); } lsSet("pp1.state", S.state); saveWorkouts(); saveDays(); S.ui.pendingRestore = null; S.ui.confirm = null; S.ui.msg = "Backup restored."; render(); } break; }
     case "reset": S.ui.confirm = "reset"; render(); break;
     case "reset-yes": S.state = { ...defaults(st.units), coachLog: st.coachLog }; S.ui.confirm = null; saveState(); render(); break;
+    case "signout": signOutNow(); break;
     case "sw-update": swUpdate(); break;
     case "sw-reload": location.reload(); break;
   }
@@ -1385,7 +1390,127 @@ if ("serviceWorker" in navigator && location.protocol !== "file:") {
   }).catch(() => {});
 }
 
+/* ================= Account + sync (the gym's Supabase project) ================= */
+// The phone keeps a full copy (so the app works offline); changes go up to the account a moment later,
+// and the coach's program, maxes and anything changed on another device come down on start and on return.
+const Cloud = window.PPCloud;
+const CL = { user: null, pushing: false, again: false, failed: false, timer: null, pulledAt: 0 };
+const LOCAL_KEYS = ["pp1.state", "pp1.workouts", "pp1.days", "pp1.program", "pp1.wsync", "pp1.stateAt", "pp1.stateSynced", "pp1.uid"];
+function stateChanged() { lsSet("pp1.stateAt", Date.now()); cloudSoon(); }
+function cloudSoon(ms = 2000) { if (!CL.user) return; clearTimeout(CL.timer); CL.timer = setTimeout(pushAll, ms); }
+const RECENT = 14 * 864e5; // new 5RMs from workouts older than this aren't sent to the coach again
+
+async function pushAll() {
+  const c = Cloud && Cloud.client(); if (!CL.user || !c) return;
+  if (CL.pushing) { CL.again = true; return; }
+  CL.pushing = true; const wasFailed = CL.failed;
+  try {
+    const uid = CL.user.id;
+    const at = lsGet("pp1.stateAt") || 0;
+    if (at > (lsGet("pp1.stateSynced") || 0)) {
+      const { error } = await c.from("client_state").upsert({ client_id: uid, data: { state: S.state, days: S.days, at }, updated_at: new Date().toISOString() });
+      if (error) throw error;
+      lsSet("pp1.stateSynced", at);
+    }
+    const sync = lsGet("pp1.wsync") || {};
+    const changed = S.workouts.filter((w) => sync[w.id] !== Cloud.hash(w));
+    if (changed.length) {
+      const { error } = await c.from("workouts").upsert(changed.map((w) => ({ id: w.id, client_id: uid, done_at: w.date, data: w })));
+      if (error) throw error;
+      for (const w of changed) {
+        if (!sync[w.id] && Date.now() - Date.parse(w.date) < RECENT) for (const m of w.maxes || []) await c.rpc("report_5rm", { p_ex: m.ex, p_rm5: m.rm5, p_suggested: m.suggested });
+        sync[w.id] = Cloud.hash(w);
+      }
+      lsSet("pp1.wsync", sync);
+    }
+    const ids = new Set(S.workouts.map((w) => w.id)), gone = Object.keys(sync).filter((id) => !ids.has(id));
+    if (gone.length) {
+      const { error } = await c.from("workouts").delete().in("id", gone);
+      if (error) throw error;
+      for (const id of gone) delete sync[id];
+      lsSet("pp1.wsync", sync);
+    }
+    CL.failed = false;
+  } catch { CL.failed = true; }
+  finally {
+    CL.pushing = false;
+    if (CL.failed !== wasFailed && S.ui.view === "setup") render();
+    if (CL.again) { CL.again = false; cloudSoon(500); }
+  }
+}
+
+async function pull() {
+  const c = Cloud && Cloud.client(); if (!CL.user || !c) return;
+  CL.pulledAt = Date.now();
+  const uid = CL.user.id;
+  const [st, wo, pr, mx] = await Promise.all([
+    c.from("client_state").select("data").eq("client_id", uid).maybeSingle(),
+    c.from("workouts").select("id,data").eq("client_id", uid).order("done_at", { ascending: false }).limit(5000),
+    c.from("programs").select("id,name,data,updated_at").eq("client_id", uid),
+    c.from("client_maxes").select("ex,rm5,rm1,target").eq("client_id", uid),
+  ]);
+  if (st.error || wo.error || pr.error || mx.error) { CL.failed = true; return; }
+  const before = Cloud.hash([S.state, S.workouts, S.days, S.program]);
+
+  // Settings and routines: the newer copy wins. A workout in progress on this phone is never replaced.
+  const remote = st.data && st.data.data, localAt = lsGet("pp1.stateAt") || 0;
+  if (remote && remote.state && (remote.at || 0) > localAt && !S.state.active) {
+    S.state = normalize(remote.state); S.days = remote.days && typeof remote.days === "object" ? remote.days : {};
+    lsSet("pp1.state", S.state); lsSet("pp1.days", S.days); lsSet("pp1.stateAt", remote.at); lsSet("pp1.stateSynced", remote.at);
+  } else if (!remote) lsSet("pp1.stateAt", Math.max(localAt, 1)); // first sign-in: upload what's already on this phone
+
+  // Workouts: merge by id. Unsynced edits on this phone win; ones deleted on another device go away here too.
+  const old = lsGet("pp1.wsync") || {}, sync = {}, have = new Map(S.workouts.map((w) => [w.id, w])), remoteIds = new Set();
+  for (const r of wo.data || []) {
+    remoteIds.add(r.id);
+    const mine = have.get(r.id);
+    if (!mine || old[r.id] === Cloud.hash(mine)) have.set(r.id, r.data);
+    sync[r.id] = Cloud.hash(r.data);
+  }
+  for (const [id, w] of have) if (!remoteIds.has(id) && old[id] && old[id] === Cloud.hash(w)) have.delete(id);
+  S.workouts = [...have.values()].sort((x, y) => (x.date < y.date ? 1 : -1));
+  lsSet("pp1.workouts", S.workouts); lsSet("pp1.wsync", sync);
+
+  // The coach's program: the latest one that has started, else the next one coming up. Maxes come with it.
+  const today = todayISO(), progs = (pr.data || []).map((r) => ({ ...r.data, id: r.id, name: r.name || (r.data && r.data.name) || "Program", _at: r.updated_at }));
+  const started = progs.filter((p) => !p.startDate || p.startDate <= today).sort((a, b) => (b.startDate || "").localeCompare(a.startDate || "") || (b._at || "").localeCompare(a._at || ""));
+  const upcoming = progs.filter((p) => p.startDate && p.startDate > today).sort((a, b) => a.startDate.localeCompare(b.startDate));
+  const pick = started[0] || upcoming[0] || null;
+  const maxes = {};
+  for (const m of mx.data || []) { const o = {}; for (const k of ["rm5", "rm1", "target"]) if (m[k] != null && +m[k] > 0) o[k] = +m[k]; maxes[m.ex] = o; }
+  if (pick) { delete pick._at; S.program = { ...pick, maxes, sample: false, cloud: true }; lsSet("pp1.program", S.program); }
+  else if (S.program && S.program.cloud) { S.program = PPSample.program(); try { localStorage.removeItem("pp1.program"); } catch {} }
+
+  if (Cloud.hash([S.state, S.workouts, S.days, S.program]) !== before) render();
+  pushAll();
+}
+
+async function signOutNow() {
+  clearTimeout(CL.timer); await pushAll();
+  if (CL.failed && !confirm("Some changes haven’t reached your account yet (no connection). Sign out anyway and lose them?")) return;
+  CL.leaving = true; clearTimeout(saveTimer);
+  await Cloud.signOut();
+  for (const k of LOCAL_KEYS) try { localStorage.removeItem(k); } catch {}
+  location.hash = ""; location.reload();
+}
+
+async function startCloud() {
+  if (!Cloud || !Cloud.client()) return; // the sign-in library couldn't load; keep working on this phone
+  let s = await Cloud.session();
+  if (!s || Cloud.isRecovery()) s = await Cloud.authScreen({ app: APP_NAME, sub: "Use the email you gave the gym. First time? Create an account." });
+  if (!s) return;
+  const prev = lsGet("pp1.uid");
+  if (prev && prev !== s.user.id) { for (const k of LOCAL_KEYS) try { localStorage.removeItem(k); } catch {} load(); } // someone else used this phone
+  lsSet("pp1.uid", s.user.id);
+  CL.user = s.user; render();
+  try { await pull(); } catch { CL.failed = true; }
+  window.addEventListener("online", () => { pushAll(); });
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && Date.now() - CL.pulledAt > 60000) pull().catch(() => {}); });
+  Cloud.client().auth.onAuthStateChange((ev) => { if (ev === "SIGNED_OUT" && CL.user && !CL.leaving) { CL.user = null; location.reload(); } });
+}
+
 /* ================= Boot ================= */
 load();
 route();
+startCloud();
 })();

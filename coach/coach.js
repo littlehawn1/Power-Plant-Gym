@@ -38,8 +38,126 @@ function migrate(d) {
   d.v = 2;
 }
 let saveT = null;
-function save() { clearTimeout(saveT); saveT = setTimeout(() => { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch { toast("Couldn’t save in this browser. Free some space and try again."); } }, 250); }
-window.addEventListener("pagehide", () => { clearTimeout(saveT); try { localStorage.setItem(KEY, JSON.stringify(db)); } catch {} });
+function save() {
+  clearTimeout(saveT);
+  if (db.cloud) { saveT = setTimeout(() => { saveT = null; pushCloud(); }, 500); return; }
+  saveT = setTimeout(() => { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch { toast("Couldn’t save in this browser. Free some space and try again."); } }, 250);
+}
+window.addEventListener("pagehide", () => { if (db && db.cloud) { if (saveT) { clearTimeout(saveT); saveT = null; pushCloud(); } return; } clearTimeout(saveT); try { localStorage.setItem(KEY, JSON.stringify(db)); } catch {} });
+window.addEventListener("beforeunload", (e) => { if (db && db.cloud && (saveT || pushing || pushFailed)) { e.preventDefault(); e.returnValue = ""; } });
+const pid = () => (crypto.randomUUID ? crypto.randomUUID() : "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (c) => (c ^ (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (c / 4)))).toString(16)));
+
+/* ================= Data: the gym's Supabase project ================= */
+// Everything loads into the same `db` shape the dashboard always used. After each change, save() compares
+// db with what was last loaded or saved and writes only the rows that changed.
+const Cloud = window.PPCloud;
+let meUser = null, snap = null, pushing = false, pushAgain = false, pushFailed = false, loadedAt = 0;
+async function loadCloud() {
+  const c = Cloud.client(), q = (t, cols) => c.from(t).select(cols);
+  const [pf, cn, mx, pr, wo, dn, gs] = await Promise.all([
+    q("profiles", "id,role,name,email,coach_id,remote,created_at").order("created_at"),
+    q("client_notes", "client_id,note"),
+    q("client_maxes", "client_id,ex,rm5,rm1,target,pending"),
+    q("programs", "id,client_id,name,data,updated_at"),
+    q("workouts", "id,client_id,done_at,data").order("done_at", { ascending: false }).limit(3000),
+    q("day_notes", "client_id,day,note"),
+    q("gym_settings", "key,data"),
+  ]);
+  const bad = [pf, cn, mx, pr, wo, dn, gs].find((r) => r.error); if (bad) throw bad.error;
+  const d = { v: 2, sample: false, cloud: true, me: meUser.id, coaches: [], clients: [], programs: [], logs: [], custom: {}, dayNotes: {} };
+  for (const p of pf.data) {
+    const name = p.name || p.email || "Unnamed";
+    if (p.role === "coach") d.coaches.push({ id: p.id, name });
+    else d.clients.push({ id: p.id, name, email: p.email, coachId: p.coach_id, remote: !!p.remote, notes: "", maxes: {} });
+  }
+  const cl = (id) => d.clients.find((x) => x.id === id);
+  for (const n of cn.data) { const k = cl(n.client_id); if (k) k.notes = n.note || ""; }
+  for (const m of mx.data) { const k = cl(m.client_id); if (!k) continue; const o = {}; for (const f of ["rm5", "rm1", "target"]) if (m[f] != null && +m[f] > 0) o[f] = +m[f]; if (m.pending) o.pending = m.pending; k.maxes[m.ex] = o; }
+  const rows = [...pr.data].sort((a, b) => ((a.data && a.data.startDate) || "").localeCompare((b.data && b.data.startDate) || "") || (a.updated_at || "").localeCompare(b.updated_at || ""));
+  for (const r of rows) { const p = { ...(r.data || {}) }; delete p.exercises; delete p.maxes; p.id = r.id; p.clientId = r.client_id; p.template = !r.client_id; p.name = p.name || r.name || "Program"; d.programs.push(p); }
+  for (const r of wo.data) d.logs.push({ ...(r.data || {}), id: r.id, clientId: r.client_id });
+  for (const n of dn.data) (d.dayNotes[n.client_id] = d.dayNotes[n.client_id] || {})[n.day] = n.note;
+  const s = (gs.data.find((x) => x.key === "coach") || {}).data || {};
+  d.custom = s.custom || {}; if (s.maxTemplates) d.maxTemplates = s.maxTemplates;
+  migrate(d);
+  return d;
+}
+// db as database rows, keyed so two snapshots can be compared.
+function rowsOf(d) {
+  const out = { prof: {}, note: {}, max: {}, prog: {}, day: {}, set: {} };
+  for (const c of d.clients) {
+    out.prof[c.id] = { coach_id: c.coachId || null, remote: !!c.remote };
+    out.note[c.id] = { client_id: c.id, note: c.notes || "" };
+    for (const [ex, m] of Object.entries(c.maxes || {})) out.max[c.id + "|" + ex] = { client_id: c.id, ex, rm5: m.rm5 ?? null, rm1: m.rm1 ?? null, target: m.target ?? null, pending: m.pending || null };
+  }
+  for (const p of d.programs) {
+    const used = new Set((p.days || []).flatMap((x) => (x.blocks || []).map((b) => b.ex)));
+    const data = { ...p, exercises: Object.fromEntries(Object.entries(d.custom || {}).filter(([id]) => used.has(id))) };
+    delete data.clientId; delete data.template;
+    out.prog[p.id] = { id: p.id, client_id: p.template ? null : p.clientId || null, name: p.name || "", data };
+  }
+  for (const [cid, days] of Object.entries(d.dayNotes || {})) for (const [day, note] of Object.entries(days)) if (note) out.day[cid + "|" + day] = { client_id: cid, day, note };
+  out.set.coach = { key: "coach", data: { custom: d.custom || {}, maxTemplates: d.maxTemplates || [] } };
+  return out;
+}
+const hashRows = (r) => Object.fromEntries(Object.entries(r).map(([k, m]) => [k, Object.fromEntries(Object.entries(m).map(([id, v]) => [id, Cloud.hash(v)]))]));
+async function pushCloud() {
+  if (!snap) return;
+  if (pushing) { pushAgain = true; return; }
+  pushing = true;
+  const c = Cloud.client(), now = rowsOf(db), h = hashRows(now), ts = new Date().toISOString();
+  const changed = (k) => Object.keys(h[k]).filter((id) => snap[k][id] !== h[k][id]);
+  const removed = (k) => Object.keys(snap[k]).filter((id) => !(id in h[k]));
+  const ok = (r) => { if (r.error) throw r.error; };
+  const up = async (k, table, extra) => {
+    const ids = changed(k); if (!ids.length) return;
+    ok(await c.from(table).upsert(ids.map((id) => ({ ...now[k][id], ...extra(id) }))));
+    for (const id of ids) snap[k][id] = h[k][id];
+  };
+  try {
+    for (const id of changed("prof")) { ok(await c.from("profiles").update(now.prof[id]).eq("id", id)); snap.prof[id] = h.prof[id]; }
+    await up("note", "client_notes", () => ({ updated_at: ts }));
+    await up("max", "client_maxes", () => ({ updated_at: ts }));
+    await up("prog", "programs", (id) => ({ updated_at: ts, ...(snap.prog[id] ? {} : { created_by: meUser.id }) }));
+    await up("day", "day_notes", () => ({ author_id: meUser.id, updated_at: ts }));
+    await up("set", "gym_settings", () => ({ updated_at: ts }));
+    for (const id of removed("max")) { const [cid, ex] = id.split("|"); ok(await c.from("client_maxes").delete().eq("client_id", cid).eq("ex", ex)); delete snap.max[id]; }
+    for (const id of removed("day")) { const [cid, day] = id.split("|"); ok(await c.from("day_notes").delete().eq("client_id", cid).eq("day", day)); delete snap.day[id]; }
+    for (const id of removed("prog")) { ok(await c.from("programs").delete().eq("id", id)); delete snap.prog[id]; }
+    if (pushFailed) toast("Saved.");
+    pushFailed = false;
+  } catch (e) {
+    if (!pushFailed) toast(`Couldn’t save: ${Cloud.friendly(e)} Your changes are kept here and will save on your next change.`);
+    pushFailed = true;
+  } finally {
+    pushing = false;
+    if (pushAgain) { pushAgain = false; pushCloud(); }
+  }
+}
+// Pick up other coaches' changes and new workouts when coming back to this tab, unless something is being edited.
+async function refreshCloud() {
+  if (!db || !db.cloud || saveT || pushing || pushFailed || Date.now() - loadedAt < 30000) return;
+  if ($("#modal").innerHTML || UI.confirm || /^#program-/.test(location.hash)) return;
+  const a = document.activeElement; if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.id !== "me") return;
+  try { const d = await loadCloud(); if (saveT || pushing) return; db = d; snap = hashRows(rowsOf(db)); loadedAt = Date.now(); renderTop(); route(); } catch {}
+}
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") refreshCloud(); });
+window.addEventListener("focus", refreshCloud);
+async function boot() {
+  if (!Cloud || !Cloud.client()) { load(); renderTop(); route(); toast("Can’t reach the gym’s account server. This is sample data, saved only in this browser."); return; }
+  $("#view").innerHTML = `<div class="empty">Loading…</div>`;
+  let s = await Cloud.session();
+  if (!s || Cloud.isRecovery()) s = await Cloud.authScreen({ app: "Power Plant Coach", sub: "For coaches. Use the email that’s on the gym’s coach list." });
+  meUser = s.user;
+  try { db = await loadCloud(); } catch (e) { $("#view").innerHTML = `<section class="panel"><h1>Couldn’t load the gym’s data</h1><p>${esc(Cloud.friendly(e))}</p><button class="btn" data-act="reload">Try again</button></section>`; return; }
+  if (!db.coaches.some((x) => x.id === meUser.id)) {
+    $("#view").innerHTML = `<section class="panel"><h1>This isn’t a coach account</h1><p>You’re signed in as ${esc(meUser.email)}, which isn’t on the gym’s coach list. Sign in with your coach email, or ask the gym to add this one as a coach.</p><button class="btn" data-act="signout">Sign out</button></section>`;
+    $("#me").closest("label").hidden = true; return;
+  }
+  snap = hashRows(rowsOf(db)); loadedAt = Date.now();
+  renderTop(); route();
+}
+const appLink = () => new URL("../app/", location.href).href;
 function seed() {
   const d = { v: 2, sample: true, me: "c1", coaches: [{ id: "c1", name: "You" }, { id: "c2", name: "Second coach (sample)" }], clients: [], programs: [], logs: [], custom: {}, dayNotes: {} };
   d.clients = [
@@ -88,7 +206,10 @@ function route() {
 }
 function setNav(k) { document.querySelectorAll("[data-nav]").forEach((a) => a.setAttribute("aria-current", a.dataset.nav === k ? "page" : "false")); }
 function renderTop() {
-  $("#me").innerHTML = db.coaches.map((c) => `<option value="${c.id}" ${c.id === db.me ? "selected" : ""}>${esc(c.name)}</option>`).join("");
+  if (db.cloud) {
+    $("#me").innerHTML = `<option>${esc(me().name)}</option>`; $("#me").disabled = true;
+    if (!$("#signout")) $("#me").closest("label").insertAdjacentHTML("afterend", `<button class="btn small ghost" id="signout" data-act="signout">Sign out</button>`);
+  } else $("#me").innerHTML = db.coaches.map((c) => `<option value="${c.id}" ${c.id === db.me ? "selected" : ""}>${esc(c.name)}</option>`).join("");
   $("#sample-pill").hidden = !db.sample;
 }
 
@@ -105,7 +226,12 @@ function renderClients() {
   }).join("");
   $("#view").innerHTML = `<div class="row"><div class="grow"><div class="eyebrow">${db.clients.length} clients · everyone’s clients are visible to every coach</div><h1>Clients</h1></div>
       <button class="btn primary" data-act="client-new">+ Add client</button></div>
-    ${UI.confirm === "client-new" ? `<form class="panel" id="newclient"><h2>New client</h2><div class="form2">
+    ${UI.confirm === "client-new" && db.cloud ? `<section class="panel"><h2>Add a client</h2>
+        <p>Clients make their own account in the app, so their workouts save to them. Send them this link and have them tap <b>Create an account</b> with their email:</p>
+        <div class="row"><a href="${esc(appLink())}" target="_blank" rel="noopener">${esc(appLink())}</a><button class="btn small" data-act="copy-link">Copy link</button></div>
+        <p class="sub">They appear in this list once they’ve confirmed their email. Then open their page to set their main coach and whether they train in person or remotely.</p>
+        <div class="row"><button type="button" class="btn ghost" data-act="cancel">Close</button></div></section>` : ""}
+    ${UI.confirm === "client-new" && !db.cloud ? `<form class="panel" id="newclient"><h2>New client</h2><div class="form2">
         <label class="f">Name<input class="in" id="nc-name" required></label><label class="f">Email (for their invite, once accounts are live)<input class="in" id="nc-email" type="email"></label>
         <label class="f">Coach<select class="in" id="nc-coach">${db.coaches.map((c) => `<option value="${c.id}" ${c.id === db.me ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></label>
         <label class="f">Training<select class="in" id="nc-remote"><option value="0">In person</option><option value="1">Remote</option></select></label></div>
@@ -214,11 +340,14 @@ function renderClient(cid) {
   const dup = UI.confirm && UI.confirm.startsWith("dup:") ? db.programs.find((p) => p.id === UI.confirm.slice(4)) : null;
   const tpls = db.programs.filter((p) => p.template);
   $("#view").innerHTML = `<div class="row"><a href="#clients" class="btn small ghost" style="text-decoration:none">← Clients</a><span class="grow"></span>
-      <label class="btn small" for="logfile" role="button" tabindex="0">Load workouts file from ${esc(c.name.replace(/^Sample client: /, ""))}</label><input type="file" id="logfile" data-c="${cid}" accept=".json,application/json" hidden></div>
-    <div class="row"><div class="grow"><div class="eyebrow">${c.remote ? "Remote" : "In person"} · Main coach: ${esc((db.coaches.find((x) => x.id === c.coachId) || {}).name || "–")}</div><h1>${esc(c.name)}</h1></div></div>
+      ${db.cloud ? "" : `<label class="btn small" for="logfile" role="button" tabindex="0">Load workouts file from ${esc(c.name.replace(/^Sample client: /, ""))}</label><input type="file" id="logfile" data-c="${cid}" accept=".json,application/json" hidden>`}</div>
+    <div class="row"><div class="grow">${db.cloud
+      ? `<div class="row"><label class="eyebrow">Main coach <select class="in" id="c-coach" data-c="${cid}"><option value="">–</option>${db.coaches.map((x) => `<option value="${x.id}" ${x.id === c.coachId ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>
+          <select class="in" id="c-remote" data-c="${cid}" aria-label="Training"><option value="0">In person</option><option value="1" ${c.remote ? "selected" : ""}>Remote</option></select><span class="sub">${esc(c.email || "")}</span></div>`
+      : `<div class="eyebrow">${c.remote ? "Remote" : "In person"} · Main coach: ${esc((db.coaches.find((x) => x.id === c.coachId) || {}).name || "–")}</div>`}<h1>${esc(c.name)}</h1></div></div>
     <div class="cols">
       <section class="feed"><div class="row"><div class="seg" role="tablist"><button role="tab" data-act="ctab" data-t="calendar" aria-selected="${tab === "calendar"}">Calendar</button><button role="tab" data-act="ctab" data-t="feed" aria-selected="${tab === "feed"}">Recent workouts</button></div></div>
-        ${tab === "calendar" ? calendarHTML(c) : logs.map((l) => logCardHTML(l)).join("") || `<div class="empty">No workouts logged yet. Once accounts are live, every workout ${esc(c.name)} finishes shows up here with their notes. Until then, load the file they send from the app (Profile → Send my workouts to my coach).</div>`}</section>
+        ${tab === "calendar" ? calendarHTML(c) : logs.map((l) => logCardHTML(l)).join("") || `<div class="empty">${db.cloud ? `No workouts logged yet. Every workout ${esc(c.name)} finishes in the app shows up here with their notes.` : `No workouts logged yet. Once accounts are live, every workout ${esc(c.name)} finishes shows up here with their notes. Until then, load the file they send from the app (Profile → Send my workouts to my coach).`}</div>`}</section>
       <aside style="display:flex;flex-direction:column;gap:18px">
         ${maxesCardHTML(c)}
         <section class="panel"><h2>Programs</h2><div class="plist">${progs || `<div class="empty">No program yet.</div>`}</div>
@@ -252,7 +381,7 @@ function renderTemplates() {
 function newProgram(cid) {
   const start = new Date(); start.setDate(start.getDate() + ((8 - start.getDay()) % 7 || 7)); // next Monday
   const sd = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-${String(start.getDate()).padStart(2, "0")}`;
-  const p = { v: 2, id: uid("p"), clientId: cid, coach: me().name, name: "New program", weeks: 6, schedule: "weekly", startDate: sd, notes: "", weekNotes: [],
+  const p = { v: 2, id: pid(), clientId: cid, coach: me().name, name: "New program", weeks: 6, schedule: "weekly", startDate: sd, notes: "", weekNotes: [],
     days: [{ id: uid("d"), name: "Day 1", weekday: 1, note: "", warmup: "", blocks: [] }, { id: uid("d"), name: "Day 2", weekday: 3, note: "", warmup: "", blocks: [] }, { id: uid("d"), name: "Day 3", weekday: 5, note: "", warmup: "", blocks: [] }] };
   db.programs.push(p); save(); return p;
 }
@@ -408,16 +537,19 @@ document.addEventListener("click", (ev) => {
   const p = cur() ? prog(cur()) : null, day = p ? p.days[UI.day] : null;
   switch (a) {
     case "client-new": UI.confirm = "client-new"; route(); setTimeout(() => $("#nc-name")?.focus(), 0); break;
+    case "copy-link": navigator.clipboard.writeText(appLink()).then(() => toast("Link copied."), () => toast(appLink())); break;
+    case "signout": Cloud.signOut().then(() => location.reload()); break;
+    case "reload": location.reload(); break;
     case "cancel": UI.confirm = null; route(); break;
     case "reset-sample": db = seed(); save(); UI.confirm = null; renderTop(); route(); toast("Sample data reset."); break;
     case "prog-new": { const np = newProgram(t.dataset.c); UI.day = 0; location.hash = "#program-" + np.id; break; }
     case "prog-dup": UI.confirm = "dup:" + t.dataset.id; route(); break;
     case "dup-yes": {
-      const src = prog(t.dataset.id), np = clone(src), to = $("#dup-to").value; np.id = uid("p"); np.coach = me().name;
+      const src = prog(t.dataset.id), np = clone(src), to = $("#dup-to").value; np.id = pid(); np.coach = me().name;
       if (to === "__tpl") { np.clientId = null; np.template = true; np.name = src.name; } else { np.clientId = to; np.template = false; np.name = src.template ? src.name : src.name + " (copy)"; }
       db.programs.push(np); save(); UI.confirm = null; location.hash = "#program-" + np.id; toast(to === "__tpl" ? "Saved to Saved programs." : `Copied to ${client(np.clientId).name}. Set the start date and adjust anything for them.`); break;
     }
-    case "save-tpl": { const np = clone(p); np.id = uid("p"); np.clientId = null; np.template = true; db.programs.push(np); save(); route(); toast(`“${p.name}” added to Saved programs.`); break; }
+    case "save-tpl": { const np = clone(p); np.id = pid(); np.clientId = null; np.template = true; db.programs.push(np); save(); route(); toast(`“${p.name}” added to Saved programs.`); break; }
     case "tpl-new": { const np = newProgram(null); np.template = true; np.name = "New saved program"; save(); UI.day = 0; location.hash = "#program-" + np.id; break; }
     case "day-copy": UI.confirm = "day-copy"; route(); break;
     case "day-copy-yes": { const dest = prog($("#daycopy-to").value); if (!dest) break; const nd = clone(day); nd.id = uid("d"); nd.blocks.forEach((b) => { b.id = uid("b"); b.weeks = (b.weeks || []).slice(0, dest.weeks); while (b.weeks.length < dest.weeks) b.weeks.push(""); }); dest.days.push(nd); save(); UI.confirm = null; route(); toast(`Copied ${day.name} into “${dest.name}”.`); break; }
@@ -427,7 +559,7 @@ document.addEventListener("click", (ev) => {
     case "daynote": { const cid = t.dataset.c, d = t.dataset.d, cur = (db.dayNotes[cid] || {})[d] || "";
       openModal(`<div class="row"><h2 class="grow">Private note · ${dateLabel(d)}</h2><button class="btn small ghost" data-act="modal-close">Close</button></div><p class="sub">Only coaches see this. The client never does.</p><textarea class="in" id="dn-text" rows="5" data-c="${cid}" data-d="${d}" placeholder="e.g. Check in about the knee; deload if it’s still sore.">${esc(cur)}</textarea><div class="row"><button class="btn primary" data-act="dn-save">Save</button>${cur ? `<button class="btn ghost danger" data-act="dn-del">Delete note</button>` : ""}</div>`); setTimeout(() => $("#dn-text")?.focus(), 30); break; }
     case "dn-save": case "dn-del": { const ta = $("#dn-text"), cid = ta.dataset.c, d = ta.dataset.d, v = a === "dn-del" ? "" : ta.value.trim(); db.dayNotes[cid] = db.dayNotes[cid] || {}; if (v) db.dayNotes[cid][d] = v; else delete db.dayNotes[cid][d]; save(); closeModal(); route(); break; }
-    case "max-approve": { const c = client(t.dataset.c), m = c.maxes[t.dataset.ex]; if (m && m.pending) { m.target = m.pending.suggested; m.rm5 = Math.max(m.rm5 || 0, m.pending.rm5); delete m.pending; save(); route(); toast(`${exMeta(t.dataset.ex).name} target max is now ${m.target}. Download the program again for ${c.name}.`); } break; }
+    case "max-approve": { const c = client(t.dataset.c), m = c.maxes[t.dataset.ex]; if (m && m.pending) { m.target = m.pending.suggested; m.rm5 = Math.max(m.rm5 || 0, m.pending.rm5); delete m.pending; save(); route(); toast(`${exMeta(t.dataset.ex).name} target max is now ${m.target}.${db.cloud ? ` ${c.name}’s app picks it up on its own.` : ` Download the program again for ${c.name}.`}`); } break; }
     case "max-dismiss": { const c = client(t.dataset.c), m = c.maxes[t.dataset.ex]; if (m) { delete m.pending; save(); route(); } break; }
     case "max-rm": { const c = client(t.dataset.c); delete c.maxes[t.dataset.ex]; save(); route(); break; }
     case "mx-save-tpl": { const c = client(t.dataset.c), name = prompt("Name this group of maxes", "Group " + (db.maxTemplates.length + 1)); if (name) { db.maxTemplates.push({ id: uid("mt"), name: name.slice(0, 60), lifts: Object.keys(c.maxes) }); save(); route(); toast("Max group saved."); } break; }
@@ -487,11 +619,13 @@ document.addEventListener("input", (ev) => {
 });
 document.addEventListener("change", (ev) => {
   const t = ev.target, p = cur() ? prog(cur()) : null;
-  if (t.id === "me") { db.me = t.value; save(); route(); return; }
+  if (t.id === "me") { if (db.cloud) return; db.me = t.value; save(); route(); return; }
+  if (t.id === "c-coach") { client(t.dataset.c).coachId = t.value || null; save(); return; }
+  if (t.id === "c-remote") { client(t.dataset.c).remote = t.value === "1"; save(); return; }
   if (t.dataset.mx) { const [cid, ex, f] = t.dataset.mx.split("|"), c = client(cid), v = parseFloat(t.value); c.maxes[ex] = c.maxes[ex] || {}; if (isFinite(v) && v > 0) c.maxes[ex][f] = v; else delete c.maxes[ex][f]; save(); route(); return; }
   if (t.id === "mx-add" && t.value) { client(t.dataset.c).maxes[t.value] = {}; save(); route(); return; }
   if (t.id === "mx-tpl" && t.value) { const c = client(t.dataset.c), tp = db.maxTemplates.find((x) => x.id === t.value); for (const id of tp.lifts) c.maxes[id] = c.maxes[id] || {}; save(); route(); return; }
-  if (t.id === "from-tpl" && t.value) { const src = prog(t.value), np = clone(src); np.id = uid("p"); np.clientId = t.dataset.c; np.template = false; np.coach = me().name; db.programs.push(np); save(); UI.day = 0; location.hash = "#program-" + np.id; toast("Copied. Set the start date and adjust anything for this client."); return; }
+  if (t.id === "from-tpl" && t.value) { const src = prog(t.value), np = clone(src); np.id = pid(); np.clientId = t.dataset.c; np.template = false; np.coach = me().name; db.programs.push(np); save(); UI.day = 0; location.hash = "#program-" + np.id; toast("Copied. Set the start date and adjust anything for this client."); return; }
   if (t.id === "feed-flag") { UI.feedFlagged = t.checked; route(); return; }
   if (t.id === "logfile") {
     const f = t.files && t.files[0], cid = t.dataset.c; if (!f) return;
@@ -539,5 +673,5 @@ document.addEventListener("submit", (ev) => {
 document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && $("#modal").innerHTML) { closeModal(); route(); } });
 window.addEventListener("hashchange", () => { UI.confirm = null; closeModal(); route(); window.scrollTo(0, 0); });
 
-load(); renderTop(); route();
+boot();
 })();
