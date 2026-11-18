@@ -2,7 +2,7 @@
    Until accounts are live, data (and a sample program) live on this device. */
 (() => {
 "use strict";
-const APP_VERSION = "0.2.0";
+const APP_VERSION = "0.2.1";
 const APP_NAME = "Power Plant";
 
 /* ================= Exercise library ================= */
@@ -370,11 +370,13 @@ function ytId(url) {
   const m = String(url || "").match(/(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/))([A-Za-z0-9_-]{11})/);
   return m ? m[1] : null;
 }
-function videoFor(id) {
+function videoLinkFor(id) {
   const pr = S.program;
-  if (pr) for (const w of pr.weeks) for (const d of w.days) for (const it of d.items) if (it.ex === id && ytId(it.video)) return ytId(it.video);
-  return ytId(GYM_VIDEOS[id]);
+  if (pr) for (const w of pr.weeks) for (const d of w.days) for (const it of d.items) if (it.ex === id && ytId(it.video)) return it.video;
+  return GYM_VIDEOS[id] || null;
 }
+function videoFor(id) { return ytId(videoLinkFor(id)); }
+const isShort = (url) => /youtube\.com\/shorts\//.test(String(url || ""));
 
 /* ================= Coach program ================= */
 // A program as the coach writes it:
@@ -725,7 +727,7 @@ function renderInfo(id) {
     : `<div class="empty">There’s no guide for this exercise yet. Custom exercises don’t come with one. You can keep your own cues in the exercise’s workout notes.</div>`;
   return `<div class="sheet-wrap" data-act="sheet-bg"><div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(e.name)} guide">
     <div class="row"><div class="grow"><div class="kind">${esc(e.muscle)} · ${esc(e.kind)}</div><h2>${esc(e.name)}</h2></div><button class="btn small ghost" data-act="info-close">${S.ui.picker ? "Back" : "Close"}</button></div>
-    <div class="guide">${videoFor(id) ? `<div class="guide-video yt"><iframe src="https://www.youtube-nocookie.com/embed/${videoFor(id)}?rel=0&playsinline=1&modestbranding=1" title="${esc(e.name)} video from Power Plant Gym" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen loading="lazy"></iframe></div>` : builtIn ? `<div class="guide-video"><video id="guide-video" src="videos/${esc(id)}.mp4" autoplay muted loop playsinline preload="metadata" aria-label="${esc(e.name)} demonstration video"></video><div class="video-soon" id="video-soon" hidden><b>Video demo coming soon</b><span>A coach-recorded video of this exercise is on the way. Follow the steps below until then.</span></div></div>` : ""}${body}</div>
+    <div class="guide">${videoFor(id) ? `<div class="guide-video yt${isShort(videoLinkFor(id)) ? " vertical" : ""}"><iframe src="https://www.youtube-nocookie.com/embed/${videoFor(id)}?rel=0&playsinline=1&modestbranding=1" title="${esc(e.name)} video from Power Plant Gym" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen loading="lazy"></iframe></div>` : builtIn ? `<div class="guide-video"><video id="guide-video" src="videos/${esc(id)}.mp4" autoplay muted loop playsinline preload="metadata" aria-label="${esc(e.name)} demonstration video"></video><div class="video-soon" id="video-soon" hidden><b>Video demo coming soon</b><span>A coach-recorded video of this exercise is on the way. Follow the steps below until then.</span></div></div>` : ""}${body}</div>
   </div></div>`;
 }
 function renderSheet() {
