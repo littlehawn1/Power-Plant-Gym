@@ -361,11 +361,19 @@ function finishWorkout() {
 }
 
 /* ================= Demo videos ================= */
-// The gym's YouTube tutorials, by exercise. A program item can also carry its own `video` link, which wins.
+// The gym's YouTube tutorials (youtube.com/@powerplantgym), by exercise. A program item can also carry its own `video` link, which wins.
 const GYM_VIDEOS = {
-  pullup: "https://www.youtube.com/watch?v=-JKuHRAH9cw",
-  chinup: "https://www.youtube.com/watch?v=-JKuHRAH9cw",
-  hip_thrust: "https://www.youtube.com/watch?v=QUjKZj1ynx4",
+  rdl: "https://www.youtube.com/watch?v=E3hUfnNjE7Y",          // Dumbbell RDL (Romanian Deadlift)
+  hip_thrust: "https://www.youtube.com/watch?v=QUjKZj1ynx4",   // Barbell Hip Thrusts: Hinge Your Way to Stronger Glutes
+  bulgarian: "https://www.youtube.com/watch?v=mTQ_m34NCoA",    // Rear Foot Elevated (RFE) Split Squat aka Bulgarian Split Squat
+  lunge: "https://www.youtube.com/watch?v=X1P5nAEVpkI",        // Dumbbell Walking Lunge
+  bench: "https://www.youtube.com/watch?v=UwzZLhkJBRM",        // Bar Path in the Bench Press - "Push Back" for Bigger Lifts!
+  pullup: "https://www.youtube.com/watch?v=-JKuHRAH9cw",       // Pull Up Variations
+  chinup: "https://www.youtube.com/watch?v=-JKuHRAH9cw",       // Pull Up Variations
+  back_ext: "https://www.youtube.com/watch?v=Pwoi4GND-1Q",     // 45-degree Back Hyper Demo
+  ohp: "https://www.youtube.com/watch?v=pOZUEGzgMG0",          // Ideal Shoulder Position for Overhead Press
+  pushdown: "https://www.youtube.com/watch?v=TfmunxJE_Xc",     // Band Pushdown Demo (band instead of cable)
+  plank: "https://www.youtube.com/watch?v=NKVi5HXK1nc",        // Weighted Plank - Uses, Cues, Common Faults
 };
 function ytId(url) {
   const m = String(url || "").match(/(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/))([A-Za-z0-9_-]{11})/);
