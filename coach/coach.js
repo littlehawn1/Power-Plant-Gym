@@ -34,6 +34,7 @@ function load() { try { db = JSON.parse(localStorage.getItem(KEY)); } catch { db
 function migrate(d) {
   d.maxTemplates = d.maxTemplates || [{ id: "mt1", name: "Squat, bench, deadlift", lifts: ["squat", "bench", "deadlift"] }];
   d.dayNotes = d.dayNotes || {};
+  d.warmupDefault = P.warmupDefaultOf(d.warmupDefault);
   for (const c of d.clients) c.maxes = c.maxes || {};
   d.v = 2;
 }
@@ -78,7 +79,7 @@ async function loadCloud() {
   for (const r of wo.data) d.logs.push({ ...(r.data || {}), id: r.id, clientId: r.client_id });
   for (const n of dn.data) (d.dayNotes[n.client_id] = d.dayNotes[n.client_id] || {})[n.day] = n.note;
   const s = (gs.data.find((x) => x.key === "coach") || {}).data || {};
-  d.custom = s.custom || {}; if (s.maxTemplates) d.maxTemplates = s.maxTemplates;
+  d.custom = s.custom || {}; if (s.maxTemplates) d.maxTemplates = s.maxTemplates; if (s.warmupDefault) d.warmupDefault = s.warmupDefault;
   migrate(d);
   return d;
 }
@@ -92,12 +93,12 @@ function rowsOf(d) {
   }
   for (const p of d.programs) {
     const used = new Set((p.days || []).flatMap((x) => (x.blocks || []).map((b) => b.ex)));
-    const data = { ...p, exercises: Object.fromEntries(Object.entries(d.custom || {}).filter(([id]) => used.has(id))) };
+    const data = { ...p, warmupDefault: d.warmupDefault, exercises: Object.fromEntries(Object.entries(d.custom || {}).filter(([id]) => used.has(id))) };
     delete data.clientId; delete data.template;
     out.prog[p.id] = { id: p.id, client_id: p.template ? null : p.clientId || null, name: p.name || "", data };
   }
   for (const [cid, days] of Object.entries(d.dayNotes || {})) for (const [day, note] of Object.entries(days)) if (note) out.day[cid + "|" + day] = { client_id: cid, day, note };
-  out.set.coach = { key: "coach", data: { custom: d.custom || {}, maxTemplates: d.maxTemplates || [] } };
+  out.set.coach = { key: "coach", data: { custom: d.custom || {}, maxTemplates: d.maxTemplates || [], warmupDefault: d.warmupDefault } };
   return out;
 }
 const hashRows = (r) => Object.fromEntries(Object.entries(r).map(([k, m]) => [k, Object.fromEntries(Object.entries(m).map(([id, v]) => [id, Cloud.hash(v)]))]));
@@ -284,6 +285,7 @@ function route() {
   if (h === "feed") return renderFeed();
   if (h === "messages" && db.cloud) return renderInbox();
   if (h === "templates") return renderTemplates();
+  if (h === "settings") return renderSettings();
   return renderClients();
 }
 function setNav(k) { document.querySelectorAll("[data-nav]").forEach((a) => a.setAttribute("aria-current", a.dataset.nav === k ? "page" : "false")); }
@@ -463,6 +465,29 @@ function renderFeed() {
 }
 
 /* ---- Saved programs (templates) ---- */
+/* ---- Gym settings ---- */
+const wuText = (plan) => plan.length ? plan.map((x) => `${fmtW(x.w)}×${x.r}`).join(", ") : "no warm-up sets";
+const fmtW = (w) => String(Math.round(w * 100) / 100);
+function renderSettings() {
+  setNav("settings");
+  const d = db.warmupDefault, ex = (work, max, custom) => wuText(P.warmupPlan({ work, bar: 45, max, step: 5, def: d, custom }));
+  $("#view").innerHTML = `<h1>Gym settings</h1>
+    <section class="panel" style="max-width:760px"><h2>Warm-up sets</h2>
+      <p class="sub">When a lift has warm-up sets turned on (in the program, under that exercise’s Settings), the client app fills them in before the first working set. The weights go up in even jumps from the empty bar to the working weight, rounded up to the nearest 5 lb.</p>
+      <div class="form3">
+        <label class="f">Reps for each warm-up set, light to heavy<input class="in" id="wu-reps" value="${esc(d.reps.join(", "))}"></label>
+        <label class="f">Heavy day: working weight at least this % of their max<input class="in" id="wu-at" type="number" min="50" max="100" value="${d.heavyAt}"></label>
+        <label class="f">Reps on a heavy day<input class="in" id="wu-heavy" value="${esc(d.heavyReps.join(", "))}"></label>
+      </div>
+      <p class="sub">The number of reps you list is the number of warm-up sets.</p>
+      <div class="panel" style="background:var(--sunken)"><b>Examples</b> (45 lb bar, max 245)
+        <div class="wu-ex">Working at 180 (73%): <span class="num">${ex(180, 245)}</span></div>
+        <div class="wu-ex">Working at 220 (90%): <span class="num">${ex(220, 245)}</span></div>
+        <div class="wu-ex">Deadlift at 125 with “start 95”: <span class="num">${ex(125, 0, "start 95")}</span></div>
+      </div>
+      <p class="sub">To change one client’s warm-up for one lift, open their program, click the exercise, and write it under “Warm-up for this lift”: <b>start 95</b> (start there instead of the bar), <b>95x5, 105x5, 115x3</b> (exactly those), <b>bar x5, 50%x5, 75%x3</b> (% of the working weight), or <b>none</b>.</p>
+    </section>`;
+}
 function renderTemplates() {
   setNav("templates");
   const t = db.programs.filter((p) => p.template);
@@ -524,7 +549,7 @@ function renderProgram(pid) {
   const head = `<tr><th class="exh">Exercise</th>${Array.from({ length: p.weeks }, (_, w) => `<th>Week ${w + 1}<span class="sub">${weekRange(p, w)}</span>${w > 0 ? `<button class="btn small ghost" data-act="copy-col" data-w="${w}" title="Copy week ${w} into week ${w + 1}">Copy week ${w} →</button>` : ""}</th>`).join("")}</tr>`;
   const rows = day ? day.blocks.map((b, bi) => {
     const m = exMeta(b.ex), lab = labels[bi], f = b.fields || defaultFields(b.ex);
-    const meta = [b.rest ? `rest ${mmss(b.rest)}` : "", `records ${fieldsText(f)}`, b.format ? P.formatText(b.format) : "", b.warmupSets ? "warm-up sets" : "", b.video ? "video ✓" : "", b.note ? "note ✓" : ""].filter(Boolean).join(" · ");
+    const meta = [b.rest ? `rest ${mmss(b.rest)}` : "", `records ${fieldsText(f)}`, b.format ? P.formatText(b.format) : "", b.warmup ? `warm-up: ${b.warmup}` : b.warmupSets ? "warm-up sets" : "", b.video ? "video ✓" : "", b.note ? "note ✓" : ""].filter(Boolean).join(" · ");
     return `<tr class="${lab && lab.start ? "group-start" : ""}"><td class="exh"><div class="exname">${lab ? `<span class="glabel" title="${lab.kind}">${lab.label}</span>` : ""}<button class="nm" data-act="ex-settings" data-b="${bi}" title="Exercise settings">${esc(m.name)}</button></div>
         <div class="meta">${esc(meta)}</div>
         <div class="rowtools"><button class="btn small" data-act="ex-settings" data-b="${bi}">Settings</button><button class="icon" data-act="b-up" data-b="${bi}" aria-label="Move up" ${bi === 0 ? "disabled" : ""}>▲</button><button class="icon" data-act="b-down" data-b="${bi}" aria-label="Move down" ${bi === day.blocks.length - 1 ? "disabled" : ""}>▼</button><button class="icon" data-act="b-rm" data-b="${bi}" aria-label="Remove ${esc(m.name)}">✕</button></div></td>
@@ -615,8 +640,20 @@ function settingsHTML(p, b) {
       ${fm.t === "emom" ? `<label class="f">Every (m:ss)<input class="in" id="s-every" value="${mmss(fm.every || 60).replace(/^(\d+)s$/, "0:$1")}"></label><label class="f">Rounds<input class="in" id="s-rounds" type="number" min="1" value="${fm.rounds || 10}"></label>` : ""}
       ${fm.t === "interval" ? `<label class="f">Work (m:ss)<input class="in" id="s-work" value="${mmss(fm.work || 40).replace(/^(\d+)s$/, "0:$1")}"></label><label class="f">Rest (m:ss)<input class="in" id="s-irest" value="${mmss(fm.rest || 20).replace(/^(\d+)s$/, "0:$1")}"></label><label class="f">Rounds<input class="in" id="s-rounds" type="number" min="1" value="${fm.rounds || 8}"></label>` : ""}
     </div>
-    <label class="fields"><input type="checkbox" id="s-warm" ${b.warmupSets ? "checked" : ""}> Add warm-up sets before this lift (the client app builds them from the first working set)</label>
+    <label class="fields"><input type="checkbox" id="s-warm" ${b.warmupSets || (b.warmup && !/^\s*(none|no|off|skip)\s*$/i.test(b.warmup)) ? "checked" : ""}> Add warm-up sets before this lift (the client app fills them in from the working weight)</label>
+    <label class="f">Warm-up for this lift <span class="sub">(optional; blank uses the <a href="#settings">gym default</a>)</span><input class="in" id="s-wu" value="${esc(b.warmup || "")}" placeholder="start 95 · or 95x5, 105x5, 115x3 · or bar x5, 50%x5, 75%x3 · or none"></label>
+    <div class="sub" id="s-wu-pv">${wuPreview(p, b)}</div>
     <div class="row"><button class="btn small" data-act="ex-change">Swap exercise…</button><span class="grow"></span><span class="sub">Changes save as you go.</span></div>`;
+}
+// What the warm-up would be for this client's first week of this lift.
+function wuPreview(p, b, text) {
+  const custom = text ?? b.warmup ?? "", pw = P.parseWarmup(custom);
+  if (pw && pw.kind === "bad") return `Couldn’t read “${esc(pw.text)}”. Write sets like 95x5, bar x5 or 50%x5, separated by commas.`;
+  const c = client(p.clientId), m = c && c.maxes && c.maxes[b.ex], max = m ? P.targetOf(m, "lb") : 0;
+  const rx = P.parsePrescription((b.weeks || []).find((x) => x && x.trim()) || ""), g = (rx.groups || []).find((x) => x.load);
+  const work = g && g.load.t === "pct" && max ? P.pctOf(max, g.load.v, "lb") : g && g.load.t === "lb" ? g.load.v : 0;
+  if (!work) return pw && pw.kind === "list" && pw.steps.every((x) => typeof x.w === "number") ? `Warm-up: ${wuText(P.warmupPlan({ work: 0, custom, def: db.warmupDefault }))}` : "The app works out the weights from the working weight on the day.";
+  return `Week 1 at ${fmtW(work)}${max ? ` (max ${fmtW(max)})` : ""}, 45 lb bar: ${esc(wuText(P.warmupPlan({ work, bar: 45, max, step: 5, def: db.warmupDefault, custom })))}`;
 }
 function openSettings(bi) { UI.editing = bi; const p = prog(cur()), b = p.days[UI.day].blocks[bi]; openModal(settingsHTML(p, b)); }
 const cur = () => (location.hash.match(/^#program-(.+)$/) || [])[1];
@@ -721,7 +758,7 @@ document.addEventListener("click", (ev) => {
     }
     case "download": {
       const c = client(p.clientId), used = new Set(p.days.flatMap((d) => d.blocks.map((b) => b.ex)));
-      const out = { ...clone(p), maxes: c ? clone(c.maxes) : {}, exercises: Object.fromEntries(Object.entries(db.custom).filter(([id]) => used.has(id))) };
+      const out = { ...clone(p), warmupDefault: db.warmupDefault, maxes: c ? clone(c.maxes) : {}, exercises: Object.fromEntries(Object.entries(db.custom).filter(([id]) => used.has(id))) };
       for (const m of Object.values(out.maxes)) delete m.pending;
       const blob = new Blob([JSON.stringify(out, null, 1)], { type: "application/json" }), url = URL.createObjectURL(blob);
       const el = document.createElement("a"); el.href = url; el.download = `${p.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.json`; document.body.appendChild(el); el.click(); el.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
@@ -746,11 +783,18 @@ document.addEventListener("input", (ev) => {
     if (t.id === "p-name") p.name = t.value; else p.days[UI.day][{ "d-name": "name", "d-note": "note", "d-warm": "warmup", "d-cool": "cooldown" }[t.id]] = t.value;
     save(); if (t.id === "d-name") document.querySelector(`.dtab[aria-pressed="true"]`).lastChild.textContent = t.value; return;
   }
-  if (UI.editing != null && p && ["s-group", "s-rest", "s-note", "s-video", "s-every", "s-rounds", "s-work", "s-irest"].includes(t.id)) applySettings(p);
+  if (UI.editing != null && p && ["s-group", "s-rest", "s-note", "s-video", "s-every", "s-rounds", "s-work", "s-irest", "s-wu"].includes(t.id)) {
+    applySettings(p);
+    if (t.id === "s-wu") { const b = p.days[UI.day].blocks[UI.editing], pv = $("#s-wu-pv"), cb = $("#s-warm"); if (pv) pv.innerHTML = wuPreview(p, b, t.value); if (cb && b.warmupSets) cb.checked = true; }
+  }
 });
 document.addEventListener("change", (ev) => {
   const t = ev.target, p = cur() ? prog(cur()) : null;
   if (t.id === "me") { if (db.cloud) return; db.me = t.value; save(); route(); return; }
+  if (["wu-reps", "wu-at", "wu-heavy"].includes(t.id)) {
+    db.warmupDefault = P.warmupDefaultOf({ reps: $("#wu-reps").value, heavyAt: +$("#wu-at").value, heavyReps: $("#wu-heavy").value });
+    save(); route(); toast("Warm-up default saved. Clients get it the next time their app loads."); return;
+  }
   if (t.id === "c-coach") { client(t.dataset.c).coachId = t.value || null; save(); return; }
   if (t.id === "c-remote") { client(t.dataset.c).remote = t.value === "1"; save(); return; }
   if (t.dataset.mx) { const [cid, ex, f] = t.dataset.mx.split("|"), c = client(cid), v = parseFloat(t.value); c.maxes[ex] = c.maxes[ex] || {}; if (isFinite(v) && v > 0) c.maxes[ex][f] = v; else delete c.maxes[ex][f]; save(); route(); return; }
@@ -809,7 +853,8 @@ function applySettings(p) {
   const fmt = $("#s-fmt").value;
   b.format = fmt === "emom" ? { t: "emom", every: parseTime($("#s-every")?.value) || 60, rounds: +($("#s-rounds")?.value) || 10 }
     : fmt === "interval" ? { t: "interval", work: parseTime($("#s-work")?.value) || 40, rest: parseTime($("#s-irest")?.value) || 20, rounds: +($("#s-rounds")?.value) || 8 } : null;
-  b.warmupSets = $("#s-warm").checked;
+  b.warmup = $("#s-wu").value.trim(); if (!b.warmup) delete b.warmup;
+  b.warmupSets = $("#s-warm").checked || !!(b.warmup && !/^\s*(none|no|off|skip)\s*$/i.test(b.warmup));
   save();
 }
 document.addEventListener("submit", (ev) => {

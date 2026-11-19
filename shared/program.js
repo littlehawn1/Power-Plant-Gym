@@ -6,7 +6,7 @@
      schedule: "weekly" | "flexible", startDate: "YYYY-MM-DD",  // weekly = each day has a weekday; flexible = any order
      notes,
      days: [{ id, name, weekday: 0-6 | null, note, warmup,      // warmup = free text for remote clients
-       blocks: [{ id, ex, group: "A" | null, rest: seconds, note, video, warmupSets: bool,
+       blocks: [{ id, ex, group: "A" | null, rest: seconds, note, video, warmupSets: bool, warmup: "" | "start 95" | "95x5, 105x5, 115x3" | "bar x5, 50%x5" | "none",
          fields: ["w","r","s","d","h"] | null,                 // what the client records; null = the exercise's default
          format: null | { t: "emom", every: 60, rounds: 10 } | { t: "interval", work: 40, rest: 20, rounds: 8 },
          weeks: ["1x3 @85%, 3x5 @75%", "…", …],                  // one prescription per week, "" = not this week
@@ -156,17 +156,67 @@
           const rx = parsePrescription(cell);
           const wn = (b.weekNotes || [])[w] || "";
           // Cells that aren't all shorthand are shown word for word; whatever could be read still sets up the logging rows.
-          return { ex: b.ex, text: rx.errors.length || rx.loose ? cell.trim() : "", groups: rx.groups, tempo: rx.tempo, pause: rx.pause, rest: b.rest || 0, note: [b.note, wn].filter(Boolean).join(" "), group: b.group || null, video: b.video || "", fields: b.fields || null, format: b.format || null, warmupSets: !!b.warmupSets, sets: rx.groups.reduce((n, g) => n + g.sets, 0) };
+          return { ex: b.ex, warmup: b.warmup || "", text: rx.errors.length || rx.loose ? cell.trim() : "", groups: rx.groups, tempo: rx.tempo, pause: rx.pause, rest: b.rest || 0, note: [b.note, wn].filter(Boolean).join(" "), group: b.group || null, video: b.video || "", fields: b.fields || null, format: b.format || null, warmupSets: !!b.warmupSets, sets: rx.groups.reduce((n, g) => n + g.sets, 0) };
         }).filter(Boolean),
       })).filter((d) => d.items.length || d.warmup || d.cooldown);
       weeks.push({ note: (program.weekNotes || [])[w] || "", days });
     }
-    return { id: program.id, name: program.name, coach: program.coach, schedule: program.schedule, startDate: program.startDate, sample: !!program.sample, maxes: program.maxes || null, weeks };
+    return { warmupDefault: program.warmupDefault || null, id: program.id, name: program.name, coach: program.coach, schedule: program.schedule, startDate: program.startDate, sample: !!program.sample, maxes: program.maxes || null, weeks };
   }
 
   /* ---- Maxes ---- */
   const ceilTo = (w, step) => (step > 0 ? Math.ceil(w / step - 1e-9) * step : w); // always round up
   const roundStep = (units) => (units === "kg" ? 2.5 : 5);
+
+  /* ---- Warm-up sets ----
+     Gym default (set by coaches): reps for each warm-up set, light to heavy, and a second list used when the
+     working weight is at least heavyAt% of the client's max (the last warm-ups are heavy, so fewer reps).
+     The weights climb in even jumps from the empty bar (or a chosen start) up to the working weight, rounded up.
+     A coach can write a different warm-up for one client's lift:
+       "start 95"                  the default reps, starting at 95 instead of the empty bar
+       "95x5, 105x5, 115x3"        exactly these (a weight on its own means 5 reps)
+       "bar x5, 50%x5, 75%x3"      "bar" is the empty bar; % is of the working weight
+       "none"                      no warm-up sets */
+  const WARMUP_DEFAULT = { reps: [5, 5, 5, 5], heavyReps: [5, 5, 3, 2], heavyAt: 85 };
+  const repList = (v, fb) => { const a = (Array.isArray(v) ? v : String(v || "").split(/[^0-9]+/)).map((x) => Math.round(+x)).filter((x) => x > 0 && x < 100).slice(0, 10); return a.length ? a : fb; };
+  function warmupDefaultOf(d) {
+    d = d && typeof d === "object" ? d : {};
+    const at = +d.heavyAt;
+    return { reps: repList(d.reps, WARMUP_DEFAULT.reps), heavyReps: repList(d.heavyReps, WARMUP_DEFAULT.heavyReps), heavyAt: at > 0 && at <= 100 ? at : WARMUP_DEFAULT.heavyAt };
+  }
+  function parseWarmup(text) {
+    const t = String(text || "").trim().toLowerCase();
+    if (!t) return null;
+    if (/^(none|no|off|skip|-+)$/.test(t)) return { kind: "none" };
+    let m = t.match(/^(?:start(?:ing)?|from)\s*(?:at\s*)?(\d+(?:\.\d+)?)$/);
+    if (m) return { kind: "start", start: +m[1] };
+    const steps = [];
+    for (const part of t.split(/[,;\n]+|\s+then\s+/).map((x) => x.trim()).filter(Boolean)) {
+      m = part.match(/^(bar|empty bar|\d+(?:\.\d+)?\s*%|\d+(?:\.\d+)?)\s*(?:(?:x|×|\*|for)\s*(\d+))?(?:\s*reps?)?$/);
+      if (!m) return { kind: "bad", text: part };
+      const w = /bar/.test(m[1]) ? "bar" : m[1].includes("%") ? { pct: parseFloat(m[1]) } : +m[1];
+      steps.push({ w, r: m[2] ? +m[2] : 5 });
+    }
+    return steps.length ? { kind: "list", steps } : null;
+  }
+  // { work, bar, max, step, def, custom } → [{ w, r }]; work is the heaviest working weight for the lift.
+  function warmupPlan({ work, bar = 0, max = 0, step = 5, def, custom } = {}) {
+    const c = parseWarmup(custom), d = warmupDefaultOf(def);
+    if (c && (c.kind === "none" || c.kind === "bad")) return [];
+    const fit = (w) => { if (!(work > 0)) return w; let x = ceilTo(w, step); if (x >= work) x = Math.floor(w / step + 1e-9) * step; return x; };
+    const out = [], seen = new Set();
+    const add = (w, r) => { if (!(w >= 0) || (work > 0 && w >= work) || seen.has(w)) return; seen.add(w); out.push({ w, r }); };
+    if (c && c.kind === "list") {
+      for (const st of c.steps) add(st.w === "bar" ? bar : st.w.pct ? fit(work * st.w.pct / 100) : st.w, st.r);
+      return work > 0 || c.steps.every((st) => typeof st.w === "number" || st.w === "bar") ? out : [];
+    }
+    if (!(work > 0)) return [];
+    const start = c && c.kind === "start" ? c.start : bar;
+    if (!(work > start)) return [];
+    const reps = max > 0 && work >= (max * d.heavyAt) / 100 ? d.heavyReps : d.reps, n = reps.length;
+    for (let i = 0; i < n; i++) add(i === 0 ? start : fit(start + ((work - start) * i) / n), reps[i]);
+    return out;
+  }
   const est1RM = (rm5, units) => (rm5 > 0 ? ceilTo(rm5 / 0.83, roundStep(units)) : 0); // the gym's 5RM ÷ 0.83 rule
   // m = { rm5, rm1, target }: the coach's target wins, then a tested 1RM, then the estimate from the 5RM.
   const targetOf = (m, units) => (!m ? 0 : m.target > 0 ? m.target : m.rm1 > 0 ? m.rm1 : est1RM(m.rm5, units));
@@ -174,7 +224,7 @@
   // **bold** in coach notes; everything else is escaped.
   const richText = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>");
 
-  const api = { moveKey, movedDate, parsePrescription, parseLoad, prescriptionText, groupText, loadText, formatText, compile, dayDate, mmss, WEEKDAYS, ceilTo, roundStep, est1RM, targetOf, pctOf, richText };
+  const api = { WARMUP_DEFAULT, warmupDefaultOf, parseWarmup, warmupPlan, moveKey, movedDate, parsePrescription, parseLoad, prescriptionText, groupText, loadText, formatText, compile, dayDate, mmss, WEEKDAYS, ceilTo, roundStep, est1RM, targetOf, pctOf, richText };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   root.PPProgram = api;
 })(typeof window !== "undefined" ? window : globalThis);

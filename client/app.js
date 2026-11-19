@@ -2,7 +2,7 @@
    Data lives on the phone and syncs to the client's account in the gym's Supabase project (see "Account + sync"). */
 (() => {
 "use strict";
-const APP_VERSION = "0.7.0";
+const APP_VERSION = "0.8.0";
 const PP = window.PPProgram;
 const APP_NAME = "Power Plant";
 
@@ -208,14 +208,26 @@ const KIND_DEFAULTS = {
 };
 const LOWER_BARBELL = new Set(["squat", "front_squat", "deadlift", "trap_dl", "rdl", "hip_thrust", "strongman_dl", "pin_squat", "tempo_squat"]);
 const PLATES = {
-  lb: [[45, "--plate-blue", 30], [35, "--plate-yellow", 27], [25, "--plate-green", 24], [10, "--plate-white", 18], [5, "--plate-black", 15], [2.5, "--plate-black", 12]],
+  lb: [[45, "--plate-blue", 30], [25, "--plate-green", 24], [10, "--plate-white", 18], [5, "--plate-black", 15], [2.5, "--plate-black", 12]],
   kg: [[25, "--plate-red", 30], [20, "--plate-blue", 30], [15, "--plate-yellow", 27], [10, "--plate-green", 24], [5, "--plate-white", 18], [2.5, "--plate-black", 14], [1.25, "--plate-black", 11]],
 };
 // The gym's bars. Weights are editable in Profile; exercises pick one in the workout.
+// The bars at Power Plant. Clients can rename, reweigh, add or remove bars in Profile.
 const DEFAULT_BARS = {
-  lb: [["olympic", "Olympic bar", 45], ["womens", "Women’s bar", 35], ["trap", "Trap bar", 60], ["ssb", "Safety squat bar", 65], ["axle", "Axle", 35], ["cambered", "Cambered bar", 60], ["swiss", "Swiss / football bar", 45], ["ez", "EZ curl bar", 25], ["tech", "Technique bar", 15]],
-  kg: [["olympic", "Olympic bar", 20], ["womens", "Women’s bar", 15], ["trap", "Trap bar", 27], ["ssb", "Safety squat bar", 30], ["axle", "Axle", 15], ["cambered", "Cambered bar", 27], ["swiss", "Swiss / football bar", 20], ["ez", "EZ curl bar", 10], ["tech", "Technique bar", 7]],
+  lb: [["olympic", "Power bar", 45], ["eleiko", "Eleiko weightlifting bar", 45], ["womens", "15 kg bar (Eleiko / Rogue Bella)", 35], ["squat", "Squat bar", 55], ["ssb", "Safety squat bar", 65], ["trap", "Trap bar", 45], ["axle", "Axle", 25], ["tech", "Training bar", 15], ["ez", "EZ curl bar", 25]],
+  kg: [["olympic", "Power bar", 20], ["eleiko", "Eleiko weightlifting bar", 20], ["womens", "15 kg bar (Eleiko / Rogue Bella)", 15], ["squat", "Squat bar", 25], ["ssb", "Safety squat bar", 30], ["trap", "Trap bar", 20], ["axle", "Axle", 11], ["tech", "Training bar", 7], ["ez", "EZ curl bar", 11]],
 };
+// The generic bars earlier versions started with. Any a client never changed are swapped for the gym's.
+const OLD_BARS = {
+  lb: { olympic: ["Olympic bar", 45], womens: ["Women’s bar", 35], trap: ["Trap bar", 60], ssb: ["Safety squat bar", 65], axle: ["Axle", 35], cambered: ["Cambered bar", 60], swiss: ["Swiss / football bar", 45], ez: ["EZ curl bar", 25], tech: ["Technique bar", 15] },
+  kg: { olympic: ["Olympic bar", 20], womens: ["Women’s bar", 15], trap: ["Trap bar", 27], ssb: ["Safety squat bar", 30], axle: ["Axle", 15], cambered: ["Cambered bar", 27], swiss: ["Swiss / football bar", 20], ez: ["EZ curl bar", 10], tech: ["Technique bar", 7] },
+};
+function gymBars(bars, units) {
+  const old = OLD_BARS[units], kept = bars.filter((b) => !(old[b.id] && old[b.id][0] === b.name && old[b.id][1] === b.w));
+  const have = new Set(kept.map((b) => b.id));
+  return [...defaultBars(units).filter((b) => !have.has(b.id)), ...kept].sort((a, b) => order(a) - order(b));
+  function order(b) { const i = DEFAULT_BARS[units].findIndex((x) => x[0] === b.id); return i < 0 ? 99 : i; }
+}
 const defaultBars = (u) => DEFAULT_BARS[u].map(([id, name, w]) => ({ id, name, w }));
 const DEFAULT_BAR_FOR = { trap_dl: "trap", skull: "ez", bb_curl: "ez" };
 const SEED_ROUTINES = [
@@ -231,7 +243,6 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = (n) => (Math.round((+n || 0) * 100) / 100).toString();
 const roundTo = (w, st) => (st > 0 ? Math.round(w / st) * st : w);
-const floorTo = (w, st) => (st > 0 ? Math.floor(w / st + 1e-9) * st : w);
 const mmss = (sec) => { sec = Math.max(0, Math.round(+sec || 0)); const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60; return h ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${m}:${String(s).padStart(2, "0")}`; };
 function parseTime(v) {
   const s = String(v ?? "").trim(); if (!s) return 0;
@@ -250,7 +261,7 @@ const e1rm = (w, r) => (w > 0 && r > 0 && r <= 12 ? w * (1 + r / 30) : 0);
 
 /* ================= State ================= */
 function defaults(units = "lb") {
-  return { v: 3, units, bar: units === "lb" ? 45 : 20, trapBar: units === "lb" ? 60 : 25, bars: defaultBars(units), ex: {}, custom: {}, routines: [], next: null, maxes: {}, rm5: {}, exNotes: {}, restOk: 90, restFail: 180, restHeavy: 180, active: null };
+  return { v: 3, units, bar: units === "lb" ? 45 : 20, trapBar: units === "lb" ? 60 : 25, bars: defaultBars(units), barsV: 2, ex: {}, custom: {}, routines: [], next: null, maxes: {}, rm5: {}, exNotes: {}, restOk: 90, restFail: 180, restHeavy: 180, active: null };
 }
 function normalize(s) {
   const units = s && s.units === "kg" ? "kg" : "lb";
@@ -274,6 +285,7 @@ function normalize(s) {
     if (s.bar > 0) out.bars[0].w = s.bar;
     if (s.trapBar > 0) out.bars[2].w = s.trapBar;
   }
+  if (s.barsV !== 2) { out.bars = gymBars(out.bars, units); out.barsV = 2; }
   if (!out.routines.find((r) => r.id === out.next)) out.next = out.routines[0]?.id || null;
   if (out.active && !Array.isArray(out.active.items)) out.active = null;
   if (out.active) for (const it of out.active.items) { // older versions stored sets as rep counts with one weight per exercise
@@ -438,18 +450,12 @@ function startWorkout(rid) {
   S.ui.summary = null;
   saveState(); render(); window.scrollTo(0, 0);
 }
+// Warm-up sets for one lift, from the coach's plan for it (or the gym default) up to the heaviest working weight.
 function warmupSets(it) {
-  const e = getEx(it.ex); const work = it.sets.find((x) => x.t === "n");
-  const W = work ? work.w : e.weight; const bar = e.barWeight; const st = smallStep(e.kind);
-  if (!(W > bar)) return [];
-  const plan = [[bar, 10], [W * 0.45, 5], [W * 0.65, 3], [W * 0.85, 2]];
-  const out = []; const seen = new Set();
-  for (const [w0, r] of plan) {
-    const w = Math.max(bar, floorTo(w0, st));
-    if (w >= W || seen.has(w)) continue; seen.add(w);
-    out.push({ t: "w", w, r, done: false });
-  }
-  return out;
+  const e = getEx(it.ex), ws = it.sets.filter((x) => x.t === "n" && +x.w > 0).map((x) => +x.w);
+  const W = ws.length ? Math.max(...ws) : +e.weight || 0, pr = program();
+  return PP.warmupPlan({ work: W, bar: e.barWeight || 0, max: maxFor(it.ex), step: smallStep(e.kind), def: pr && pr.warmupDefault, custom: it.rx && it.rx.warmup })
+    .map(({ w, r }) => ({ t: "w", w, r, done: false }));
 }
 function finishWorkout() {
   const a = S.state.active; if (!a) return;
@@ -780,7 +786,7 @@ function rxEntry(it) {
     }
     const entry = { ex: it.ex, note: "", rx: it, group: it.group || null, fields, sets };
     if (entry.sets.some((x) => x.top)) for (const x of entry.sets) if (x.top) x.w = "";
-    if (it.warmupSets && fields.includes("w")) entry.sets.unshift(...warmupSets(entry));
+    if ((it.warmupSets || (it.warmup && !/^\s*(none|no|off|skip)\s*$/i.test(it.warmup))) && fields.includes("w")) entry.sets.unshift(...warmupSets(entry));
     return entry;
   }
   const e = getEx(it.ex), w = rxLoadWeight(it), sets = [];

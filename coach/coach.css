@@ -186,3 +186,5 @@ table.maxt { width: 100%; border-collapse: collapse; font-size: 14px; }
 .cw.dragging { opacity: .45; }
 .cday.drop-on { outline: 2px dashed #f07521; outline-offset: -2px; }
 .cw .moved { color: #f07521; font-weight: 600; }
+
+.wu-ex { margin-top: 6px; }
