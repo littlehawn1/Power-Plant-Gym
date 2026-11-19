@@ -587,7 +587,7 @@ function pickerHTML(q) {
   return list + (lo && !exact ? `<div class="grp">New exercise</div><div style="padding:12px" class="form2">
       <label class="f">Name<input class="in" id="nx-name" value="${esc(q.trim())}"></label>
       <label class="f">Muscle / category<input class="in" id="nx-muscle" value="Strongman" list="muscles"><datalist id="muscles">${[...LIBR.MUSCLES, "Strongman", "Mobility", "Warm-up"].map((x) => `<option value="${x}">`).join("")}</datalist></label>
-      <label class="f">Equipment<input class="in" id="nx-kind" value="strongman" list="kinds"><datalist id="kinds">${[...LIBR.KINDS, "strongman", "kettlebell", "band", "other"].map((x) => `<option value="${x}">`).join("")}</datalist></label>
+      <label class="f">Equipment<input class="in" id="nx-kind" value="strongman" list="kinds"><datalist id="kinds">${[...new Set([...LIBR.KINDS, "strongman", "kettlebell", "band", "other"])].map((x) => `<option value="${x}">`).join("")}</datalist></label>
       <label class="f">YouTube link (optional)<input class="in" id="nx-video" placeholder="https://youtu.be/…"></label>
       <div class="fields" style="grid-column:1/-1"><span class="sub">Client records:</span>${Object.entries(LIBR.FIELD_NAMES).map(([k, n]) => `<label><input type="checkbox" class="nx-f" value="${k}" ${k === "w" || k === "r" ? "checked" : ""}> ${n}</label>`).join("")}</div>
       <button class="btn primary" data-act="pick-new" style="grid-column:1/-1">Create and add</button></div>` : "");
