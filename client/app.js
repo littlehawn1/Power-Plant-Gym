@@ -323,7 +323,9 @@ window.addEventListener("pagehide", () => { if (CL.leaving) return; clearTimeout
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden" && S.state && !CL.leaving) { clearTimeout(saveTimer); lsSet("pp1.state", S.state); } });
 
 /* ================= Exercises ================= */
-function meta(id) { const px = S.program && S.program.exercises && S.program.exercises[id]; return LIB[id] || (S.state.custom[id] ? { track: "wr", ...S.state.custom[id], id } : px ? { track: "wr", sets: 3, repsMin: 5, repsMax: 5, kind: "other", muscle: "Other", ...px, id } : null); }
+function meta(id) { const px = S.program && S.program.exercises && S.program.exercises[id];
+  if (LIB[id] && px) { const o = { ...LIB[id] }; for (const k of ["name", "muscle", "kind", "video"]) if (px[k]) o[k] = px[k]; return o; } // the gym's edits to one of its exercises
+  return LIB[id] || (S.state.custom[id] ? { track: "wr", ...S.state.custom[id], id } : px ? { track: "wr", sets: 3, repsMin: 5, repsMax: 5, kind: "other", muscle: "Other", ...px, id } : null); }
 function getEx(id) {
   const m = meta(id) || { id, name: id, kind: "machine", muscle: "Other", sets: 3, repsMin: 8, repsMax: 12, track: "wr" };
   const kd = KIND_DEFAULTS[S.state.units][m.kind] || KIND_DEFAULTS[S.state.units].machine;

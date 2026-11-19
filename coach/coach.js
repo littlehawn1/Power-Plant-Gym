@@ -23,7 +23,11 @@ function toast(text, action) {
 /* ================= Exercises ================= */
 const LIB = {};
 for (const [id, name, kind, muscle, sets, repsMin, repsMax, extra] of LIBR.LIB_ROWS) LIB[id] = { id, name, kind, muscle, track: "wr", ...(extra || {}) };
-const exMeta = (id) => LIB[id] || db.custom[id] || { id, name: id, kind: "other", muscle: "Other", track: "wr" };
+// An exercise as coaches see it. The gym's built-in exercises can be edited or deleted: those changes are kept in
+// db.custom under the same id (only what changed, plus deleted: true) and laid over the original.
+const exMeta = (id) => { const l = LIB[id], c = db.custom[id]; return l ? (c ? { ...l, ...c, id } : l) : c || { id, name: id, kind: "other", muscle: "Other", track: "wr" }; };
+const isBuiltIn = (id) => !!LIB[id];
+const allEx = (withDeleted) => [...new Set([...Object.keys(LIB), ...Object.keys(db.custom)])].map(exMeta).filter((m) => m && m.name && (withDeleted || !m.deleted));
 const defaultFields = (id) => LIBR.TRACK_FIELDS[exMeta(id).track || "wr"] || ["w", "r"];
 const fieldsText = (f) => f.map((k) => LIBR.FIELD_NAMES[k].toLowerCase()).join(", ");
 
@@ -379,7 +383,7 @@ function maxesCardHTML(c) {
       <td><button class="icon" data-act="max-rm" data-c="${c.id}" data-ex="${esc(id)}" aria-label="Stop tracking ${esc(exMeta(id).name)}">✕</button></td></tr>`;
   }).join("");
   const tracked = new Set(ids);
-  const opts = [...Object.values(LIB), ...Object.values(db.custom)].filter((m) => !tracked.has(m.id)).map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join("");
+  const opts = allEx().filter((m) => !tracked.has(m.id)).map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join("");
   return `<section class="panel"><div class="row"><h2 class="grow">Maxes</h2><span class="sub">lb</span></div>
     ${rows ? `<table class="maxt"><thead><tr><th>Lift</th><th>5RM</th><th>Est. 1RM</th><th>Tested 1RM</th><th>Target max</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : `<div class="empty">No maxes tracked yet.</div>`}
     <p class="sub">Percentages in this client’s programs use the <b>target max</b>. Leave it blank to use the tested 1RM, or the estimate (5RM ÷ 0.83, rounded up to 5). New 5RMs the client logs are saved here; a new target waits for your OK.</p>
@@ -472,28 +476,30 @@ const videoOf = (m) => (m && m.video) || GYMV[m && m.id] || "";
 function exUses(id) { return db.programs.filter((p) => (p.days || []).some((d) => (d.blocks || []).some((b) => b.ex === id))); }
 function exListHTML() {
   const q = (UI.exQ || "").trim().toLowerCase(), f = UI.exF || "all";
-  const all = [...Object.values(LIB), ...Object.values(db.custom)].filter((m) => m && m.name)
-    .filter((m) => f === "all" || (f === "yours" ? db.custom[m.id] : f === "video" ? videoOf(m) : f === "novideo" ? !videoOf(m) : true))
+  if (f === "deleted") { const del = allEx(true).filter((m) => m.deleted).sort((a, b) => a.name.localeCompare(b.name));
+    return `<p class="sub">${del.length} deleted. Restoring one puts it back in the list coaches pick from.</p>${del.map((m) => `<div class="exrow"><span class="grow"><b>${esc(m.name)}</b><span class="sub"> · ${esc(m.muscle || "Other")}</span></span><button class="btn small" data-act="ex-restore" data-id="${esc(m.id)}">Restore</button></div>`).join("") || `<div class="empty">Nothing deleted.</div>`}`; }
+  const all = allEx()
+    .filter((m) => f === "all" || (f === "yours" ? !isBuiltIn(m.id) : f === "changed" ? isBuiltIn(m.id) && db.custom[m.id] : f === "video" ? videoOf(m) : f === "novideo" ? !videoOf(m) : true))
     .filter((m) => !q || m.name.toLowerCase().includes(q) || (m.muscle || "").toLowerCase().includes(q) || (m.kind || "").toLowerCase().includes(q));
   const groups = {}; for (const m of all) (groups[m.muscle || "Other"] = groups[m.muscle || "Other"] || []).push(m);
   const order = [...LIBR.MUSCLES, ...Object.keys(groups).filter((x) => !LIBR.MUSCLES.includes(x)).sort()];
   const out = order.filter((mu) => groups[mu]).map((mu) => `<div class="exgrp"><h3>${esc(mu)} <span class="sub">${groups[mu].length}</span></h3>${groups[mu].sort((a, b) => a.name.localeCompare(b.name)).map((m) => {
-    const v = videoOf(m), mine = !!db.custom[m.id];
-    return `<button class="exrow" data-act="ex-open" data-id="${esc(m.id)}"><span class="grow"><b>${esc(m.name)}</b><span class="sub"> · ${esc(m.kind || "other")}</span></span>${mine ? `<span class="tag">Added by coaches</span>` : ""}${v ? `<span class="tag vid">▶ Video</span>` : ""}</button>`;
+    const v = videoOf(m), mine = !isBuiltIn(m.id), changed = !mine && db.custom[m.id];
+    return `<button class="exrow" data-act="ex-open" data-id="${esc(m.id)}"><span class="grow"><b>${esc(m.name)}</b><span class="sub"> · ${esc(m.kind || "other")}</span></span>${mine ? `<span class="tag">Added by coaches</span>` : changed ? `<span class="tag">Edited</span>` : ""}${v ? `<span class="tag vid">▶ Video</span>` : ""}</button>`;
   }).join("")}</div>`).join("");
   return `<p class="sub">${all.length} exercise${all.length === 1 ? "" : "s"}</p>${out || `<div class="empty">Nothing matches. Use “+ New exercise” to add it.</div>`}`;
 }
 function renderExercises() {
   setNav("exercises");
-  const n = Object.keys(LIB).length + Object.keys(db.custom).length;
+  const n = allEx().length;
   $("#view").innerHTML = `<div class="row"><h1 class="grow">Exercises</h1><button class="btn primary" data-act="ex-new">+ New exercise</button></div>
-    <p class="sub">All ${n} exercises coaches can put in a program. The gym’s exercises come with the app, and many have a video from the gym’s YouTube channel. Exercises you add here are saved for every coach and show up when you add an exercise to a program.</p>
+    <p class="sub">All ${n} exercises coaches can put in a program. The gym’s exercises come with the app, and many have a video from the gym’s YouTube channel. Click any exercise to change its name, category, equipment, video or what clients record, or to delete it. Changes are saved for every coach and reach clients with their programs.</p>
     <div class="row"><input class="in grow" id="ex-q" placeholder="Search by name, muscle or equipment" value="${esc(UI.exQ || "")}" autocomplete="off">
-      <select class="in" id="ex-f" aria-label="Show"><option value="all">All</option><option value="yours" ${UI.exF === "yours" ? "selected" : ""}>Added by coaches</option><option value="video" ${UI.exF === "video" ? "selected" : ""}>With a video</option><option value="novideo" ${UI.exF === "novideo" ? "selected" : ""}>Without a video</option></select></div>
+      <select class="in" id="ex-f" aria-label="Show"><option value="all">All</option><option value="yours" ${UI.exF === "yours" ? "selected" : ""}>Added by coaches</option><option value="video" ${UI.exF === "video" ? "selected" : ""}>With a video</option><option value="novideo" ${UI.exF === "novideo" ? "selected" : ""}>Without a video</option><option value="changed" ${UI.exF === "changed" ? "selected" : ""}>Gym exercises you edited</option><option value="deleted" ${UI.exF === "deleted" ? "selected" : ""}>Deleted</option></select></div>
     <div id="ex-list">${exListHTML()}</div>`;
 }
 function exFormHTML(m) {
-  const f = (m && m.fields) || ["w", "r"], cats = [...new Set([...LIBR.MUSCLES, "Strongman", "Mobility", "Warm-up", ...Object.values(db.custom).map((x) => x.muscle)])].filter(Boolean);
+  const f = (m && m.fields) || ["w", "r"], cats = [...new Set([...LIBR.MUSCLES, "Strongman", "Mobility", "Warm-up", ...allEx().map((x) => x.muscle)])].filter(Boolean);
   return `<div class="form2">
       <label class="f">Name<input class="in" id="nx-name" value="${esc((m && m.name) || "")}" placeholder="e.g. Yoke carry"></label>
       <label class="f">Muscle / category<input class="in" id="nx-muscle" value="${esc((m && m.muscle) || "Strongman")}" list="muscles"><datalist id="muscles">${cats.map((x) => `<option value="${esc(x)}">`).join("")}</datalist></label>
@@ -508,12 +514,16 @@ function readExForm() {
   return { name, muscle: $("#nx-muscle").value.trim() || "Other", kind: $("#nx-kind").value.trim().toLowerCase() || "other", video: $("#nx-video").value.trim(), fields: fields.length ? fields : ["w", "r"] };
 }
 function openExercise(id) {
-  const m = exMeta(id), mine = !!db.custom[id], v = videoOf(m), uses = exUses(id);
+  const m = exMeta(id), mine = !isBuiltIn(id), changed = !mine && db.custom[id], v = videoOf(m), uses = exUses(id);
   const used = uses.length ? `Used in ${uses.length} program${uses.length === 1 ? "" : "s"}: ${uses.slice(0, 6).map((p) => esc(p.name) + (p.clientId && client(p.clientId) ? ` (${esc(client(p.clientId).name)})` : "")).join(", ")}${uses.length > 6 ? "…" : ""}` : "Not in any program yet.";
-  openModal(`<div class="row"><div class="grow"><div class="eyebrow">${esc(m.muscle || "Other")} · ${esc(m.kind || "other")}${mine ? " · added by coaches" : " · comes with the app"}</div><h2>${esc(m.name)}</h2></div><button class="btn small ghost" data-act="modal-close">Close</button></div>
-    ${v ? `<p><a href="${esc(v)}" target="_blank" rel="noopener">▶ Watch the video</a></p>` : `<p class="sub">No video${mine ? " yet. Add a YouTube link below." : ". You can add one for a client in their program (click the exercise → Video link)."}</p>`}
+  const form = { ...m, video: m.video || (GYMV[id] || ""), fields: m.fields || defaultFields(id) };
+  openModal(`<div class="row"><div class="grow"><div class="eyebrow">${esc(m.muscle || "Other")} · ${esc(m.kind || "other")}${mine ? " · added by coaches" : changed ? " · gym exercise, edited" : " · gym exercise"}</div><h2>${esc(m.name)}</h2></div><button class="btn small ghost" data-act="modal-close">Close</button></div>
+    ${v ? `<p><a href="${esc(v)}" target="_blank" rel="noopener">▶ Watch the video</a></p>` : `<p class="sub">No video yet. Add a YouTube link below.</p>`}
     <p class="sub">${used}</p>
-    ${mine ? `${exFormHTML(m)}<div class="row"><button class="btn primary" data-act="ex-save" data-id="${esc(id)}">Save</button><span class="grow"></span>${uses.length ? `<span class="sub">To delete it, take it out of those programs first.</span>` : `<button class="btn danger" data-act="ex-del" data-id="${esc(id)}">Delete</button>`}</div>` : ""}`);
+    ${exFormHTML(form)}
+    <div class="row"><button class="btn primary" data-act="ex-save" data-id="${esc(id)}">Save</button>${changed ? `<button class="btn" data-act="ex-reset" data-id="${esc(id)}">Reset to the original</button>` : ""}<span class="grow"></span>
+      ${uses.length ? `<span class="sub">To delete it, take it out of those programs first.</span>` : `<button class="btn danger" data-act="ex-del" data-id="${esc(id)}">Delete</button>`}</div>
+    ${uses.length ? "" : `<p class="sub">${mine ? "Deleting removes it for every coach (you can undo right after)." : "A deleted gym exercise can be brought back from the “Deleted” filter."}</p>`}`);
 }
 function newExerciseModal() {
   openModal(`<div class="row"><h2 class="grow">New exercise</h2><button class="btn small ghost" data-act="modal-close">Close</button></div>
@@ -659,12 +669,12 @@ function renderProgram(pid) {
 function openModal(html) { $("#modal").innerHTML = `<div class="modal-wrap" data-act="modal-bg"><div class="modal" role="dialog" aria-modal="true">${html}</div></div>`; }
 function closeModal() { $("#modal").innerHTML = ""; UI.picker = null; UI.editing = null; }
 function pickerHTML(q) {
-  const all = [...Object.values(LIB), ...Object.values(db.custom)];
+  const all = allEx();
   const lo = q.trim().toLowerCase();
   const hits = all.filter((m) => !lo || m.name.toLowerCase().includes(lo) || m.muscle.toLowerCase().includes(lo));
   const groups = {}; for (const m of hits) (groups[m.muscle] = groups[m.muscle] || []).push(m);
-  let list = ""; for (const mu of LIBR.MUSCLES) if (groups[mu]) list += `<div class="grp">${esc(mu)}</div>` + groups[mu].map((m) => `<button data-act="pick" data-id="${esc(m.id)}"><span>${esc(m.name)}</span><span class="sub">${esc(m.kind)}${db.custom[m.id] ? " · yours" : ""}</span></button>`).join("");
-  for (const mu of Object.keys(groups)) if (!LIBR.MUSCLES.includes(mu)) list += `<div class="grp">${esc(mu)}</div>` + groups[mu].map((m) => `<button data-act="pick" data-id="${esc(m.id)}"><span>${esc(m.name)}</span><span class="sub">yours</span></button>`).join("");
+  let list = ""; for (const mu of LIBR.MUSCLES) if (groups[mu]) list += `<div class="grp">${esc(mu)}</div>` + groups[mu].map((m) => `<button data-act="pick" data-id="${esc(m.id)}"><span>${esc(m.name)}</span><span class="sub">${esc(m.kind)}${!isBuiltIn(m.id) ? " · added by coaches" : ""}</span></button>`).join("");
+  for (const mu of Object.keys(groups)) if (!LIBR.MUSCLES.includes(mu)) list += `<div class="grp">${esc(mu)}</div>` + groups[mu].map((m) => `<button data-act="pick" data-id="${esc(m.id)}"><span>${esc(m.name)}</span><span class="sub">${esc(m.kind || "")}${!isBuiltIn(m.id) ? " · added by coaches" : ""}</span></button>`).join("");
   const exact = all.some((m) => m.name.toLowerCase() === lo);
   return list + (lo && !exact ? `<div class="grp">New exercise</div><div style="padding:12px" class="form2">
       <label class="f">Name<input class="in" id="nx-name" value="${esc(q.trim())}"></label>
@@ -756,16 +766,30 @@ document.addEventListener("click", (ev) => {
     case "ex-new": newExerciseModal(); break;
     case "ex-open": openExercise(t.dataset.id); break;
     case "ex-create": { const v = readExForm(); if (!v) break;
-      const clash = [...Object.values(LIB), ...Object.values(db.custom)].find((m) => m.name.toLowerCase() === v.name.toLowerCase());
+      const clash = allEx(true).find((m) => m.name.toLowerCase() === v.name.toLowerCase());
+      if (clash && clash.deleted) { toast(`“${clash.name}” was deleted. Restore it from the Deleted filter.`); break; }
       if (clash) { toast(`“${clash.name}” is already in the list.`); break; }
       const id = "c_" + v.name.toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 30) + "_" + Math.random().toString(36).slice(2, 5);
       db.custom[id] = { id, track: "wr", ...v }; save(); closeModal(); route(); toast(`Added “${v.name}”.`); break; }
-    case "ex-save": { const id = t.dataset.id, v = readExForm(); if (!v || !db.custom[id]) break;
-      db.custom[id] = { ...db.custom[id], ...v }; save(); closeModal(); route(); toast("Saved."); break; }
-    case "ex-del": { const id = t.dataset.id; if (!db.custom[id] || exUses(id).length) break;
-      const gone = db.custom[id]; delete db.custom[id]; save(); closeModal(); route();
-      toast(`Deleted “${gone.name}”.`, { act: "ex-undel", label: "Undo" }); deletedEx = gone; break; }
-    case "ex-undel": if (deletedEx) { db.custom[deletedEx.id] = deletedEx; deletedEx = null; save(); route(); $("#toast").hidden = true; } break;
+    case "ex-save": { const id = t.dataset.id, v = readExForm(); if (!v) break;
+      const clash = allEx(true).find((m) => m.id !== id && m.name.toLowerCase() === v.name.toLowerCase());
+      if (clash) { toast(`Another exercise is already called “${clash.name}”.`); break; }
+      if (isBuiltIn(id)) { // keep only what differs from the gym's original
+        const l = LIB[id], o = { id };
+        if (v.name !== l.name) o.name = v.name; if (v.muscle !== l.muscle) o.muscle = v.muscle; if (v.kind !== l.kind) o.kind = v.kind;
+        if (v.video !== (GYMV[id] || "")) o.video = v.video; if (v.fields.join() !== defaultFields(id).join() || (db.custom[id] && db.custom[id].fields)) o.fields = v.fields;
+        if (o.fields && o.fields.join() === (LIBR.TRACK_FIELDS[l.track || "wr"] || ["w", "r"]).join()) delete o.fields;
+        if (Object.keys(o).length > 1) db.custom[id] = o; else delete db.custom[id];
+      } else db.custom[id] = { ...db.custom[id], ...v };
+      save(); closeModal(); route(); toast("Saved."); break; }
+    case "ex-reset": delete db.custom[t.dataset.id]; save(); closeModal(); route(); toast("Back to the gym’s original."); break;
+    case "ex-del": { const id = t.dataset.id; if (exUses(id).length) break;
+      deletedEx = db.custom[id] ? clone(db.custom[id]) : { id, _none: true };
+      if (isBuiltIn(id)) db.custom[id] = { ...(db.custom[id] || {}), id, deleted: true }; else delete db.custom[id];
+      save(); closeModal(); route(); toast(`Deleted “${exMeta(id).name}”.`, { act: "ex-undel", label: "Undo" }); break; }
+    case "ex-restore": { const id = t.dataset.id, c = db.custom[id]; if (!c) break; delete c.deleted; if (Object.keys(c).length <= 1) delete db.custom[id];
+      save(); route(); toast(`Restored “${exMeta(id).name}”.`); break; }
+    case "ex-undel": if (deletedEx) { if (deletedEx._none) delete db.custom[deletedEx.id]; else db.custom[deletedEx.id] = deletedEx; deletedEx = null; save(); route(); $("#toast").hidden = true; } break;
     case "prog-rm": UI.confirm = "rm:" + t.dataset.id; route(); break;
     case "prog-rm-yes": { const i = db.programs.findIndex((x) => x.id === t.dataset.id); if (i < 0) break;
       removedProg = db.programs[i]; db.programs.splice(i, 1); UI.confirm = null; save(); route();
