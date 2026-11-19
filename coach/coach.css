@@ -188,3 +188,12 @@ table.maxt { width: 100%; border-collapse: collapse; font-size: 14px; }
 .cw .moved { color: #f07521; font-weight: 600; }
 
 .wu-ex { margin-top: 6px; }
+
+/* Exercises page */
+.exgrp { margin-top: 18px; }
+.exgrp h3 { margin: 0 0 6px; font-size: 15px; }
+.exrow { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; font: inherit; color: inherit; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 9px 12px; margin-bottom: 4px; cursor: pointer; }
+.exrow:hover { border-color: #f07521; }
+.exrow .grow { min-width: 0; overflow-wrap: anywhere; }
+.tag { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--sunken); white-space: nowrap; }
+.tag.vid { color: #f07521; }

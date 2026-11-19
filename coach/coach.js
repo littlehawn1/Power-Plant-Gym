@@ -286,6 +286,7 @@ function route() {
   if (h === "messages" && db.cloud) return renderInbox();
   if (h === "templates") return renderTemplates();
   if (h === "settings") return renderSettings();
+  if (h === "exercises") return renderExercises();
   return renderClients();
 }
 function setNav(k) { document.querySelectorAll("[data-nav]").forEach((a) => a.setAttribute("aria-current", a.dataset.nav === k ? "page" : "false")); }
@@ -465,6 +466,62 @@ function renderFeed() {
 }
 
 /* ---- Saved programs (templates) ---- */
+/* ---- Exercises: the gym's library plus the ones coaches added ---- */
+const GYMV = window.PPVideos || {};
+const videoOf = (m) => (m && m.video) || GYMV[m && m.id] || "";
+function exUses(id) { return db.programs.filter((p) => (p.days || []).some((d) => (d.blocks || []).some((b) => b.ex === id))); }
+function exListHTML() {
+  const q = (UI.exQ || "").trim().toLowerCase(), f = UI.exF || "all";
+  const all = [...Object.values(LIB), ...Object.values(db.custom)].filter((m) => m && m.name)
+    .filter((m) => f === "all" || (f === "yours" ? db.custom[m.id] : f === "video" ? videoOf(m) : f === "novideo" ? !videoOf(m) : true))
+    .filter((m) => !q || m.name.toLowerCase().includes(q) || (m.muscle || "").toLowerCase().includes(q) || (m.kind || "").toLowerCase().includes(q));
+  const groups = {}; for (const m of all) (groups[m.muscle || "Other"] = groups[m.muscle || "Other"] || []).push(m);
+  const order = [...LIBR.MUSCLES, ...Object.keys(groups).filter((x) => !LIBR.MUSCLES.includes(x)).sort()];
+  const out = order.filter((mu) => groups[mu]).map((mu) => `<div class="exgrp"><h3>${esc(mu)} <span class="sub">${groups[mu].length}</span></h3>${groups[mu].sort((a, b) => a.name.localeCompare(b.name)).map((m) => {
+    const v = videoOf(m), mine = !!db.custom[m.id];
+    return `<button class="exrow" data-act="ex-open" data-id="${esc(m.id)}"><span class="grow"><b>${esc(m.name)}</b><span class="sub"> · ${esc(m.kind || "other")}</span></span>${mine ? `<span class="tag">Added by coaches</span>` : ""}${v ? `<span class="tag vid">▶ Video</span>` : ""}</button>`;
+  }).join("")}</div>`).join("");
+  return `<p class="sub">${all.length} exercise${all.length === 1 ? "" : "s"}</p>${out || `<div class="empty">Nothing matches. Use “+ New exercise” to add it.</div>`}`;
+}
+function renderExercises() {
+  setNav("exercises");
+  const n = Object.keys(LIB).length + Object.keys(db.custom).length;
+  $("#view").innerHTML = `<div class="row"><h1 class="grow">Exercises</h1><button class="btn primary" data-act="ex-new">+ New exercise</button></div>
+    <p class="sub">All ${n} exercises coaches can put in a program. The gym’s exercises come with the app, and many have a video from the gym’s YouTube channel. Exercises you add here are saved for every coach and show up when you add an exercise to a program.</p>
+    <div class="row"><input class="in grow" id="ex-q" placeholder="Search by name, muscle or equipment" value="${esc(UI.exQ || "")}" autocomplete="off">
+      <select class="in" id="ex-f" aria-label="Show"><option value="all">All</option><option value="yours" ${UI.exF === "yours" ? "selected" : ""}>Added by coaches</option><option value="video" ${UI.exF === "video" ? "selected" : ""}>With a video</option><option value="novideo" ${UI.exF === "novideo" ? "selected" : ""}>Without a video</option></select></div>
+    <div id="ex-list">${exListHTML()}</div>`;
+}
+function exFormHTML(m) {
+  const f = (m && m.fields) || ["w", "r"], cats = [...new Set([...LIBR.MUSCLES, "Strongman", "Mobility", "Warm-up", ...Object.values(db.custom).map((x) => x.muscle)])].filter(Boolean);
+  return `<div class="form2">
+      <label class="f">Name<input class="in" id="nx-name" value="${esc((m && m.name) || "")}" placeholder="e.g. Yoke carry"></label>
+      <label class="f">Muscle / category<input class="in" id="nx-muscle" value="${esc((m && m.muscle) || "Strongman")}" list="muscles"><datalist id="muscles">${cats.map((x) => `<option value="${esc(x)}">`).join("")}</datalist></label>
+      <label class="f">Equipment<input class="in" id="nx-kind" value="${esc((m && m.kind) || "strongman")}" list="kinds"><datalist id="kinds">${LIBR.KINDS.map((x) => `<option value="${x}">`).join("")}</datalist></label>
+      <label class="f">YouTube link (optional)<input class="in" id="nx-video" value="${esc((m && m.video) || "")}" placeholder="https://youtu.be/…"></label>
+      <div class="fields" style="grid-column:1/-1"><span class="sub">Clients record:</span>${Object.entries(LIBR.FIELD_NAMES).map(([k, n]) => `<label><input type="checkbox" class="nx-f" value="${k}" ${f.includes(k) ? "checked" : ""}> ${n}</label>`).join("")}</div>
+    </div>`;
+}
+function readExForm() {
+  const name = ($("#nx-name").value || "").trim(); if (!name) { toast("Give the exercise a name."); return null; }
+  const fields = [...document.querySelectorAll(".nx-f:checked")].map((x) => x.value);
+  return { name, muscle: $("#nx-muscle").value.trim() || "Other", kind: $("#nx-kind").value.trim().toLowerCase() || "other", video: $("#nx-video").value.trim(), fields: fields.length ? fields : ["w", "r"] };
+}
+function openExercise(id) {
+  const m = exMeta(id), mine = !!db.custom[id], v = videoOf(m), uses = exUses(id);
+  const used = uses.length ? `Used in ${uses.length} program${uses.length === 1 ? "" : "s"}: ${uses.slice(0, 6).map((p) => esc(p.name) + (p.clientId && client(p.clientId) ? ` (${esc(client(p.clientId).name)})` : "")).join(", ")}${uses.length > 6 ? "…" : ""}` : "Not in any program yet.";
+  openModal(`<div class="row"><div class="grow"><div class="eyebrow">${esc(m.muscle || "Other")} · ${esc(m.kind || "other")}${mine ? " · added by coaches" : " · comes with the app"}</div><h2>${esc(m.name)}</h2></div><button class="btn small ghost" data-act="modal-close">Close</button></div>
+    ${v ? `<p><a href="${esc(v)}" target="_blank" rel="noopener">▶ Watch the video</a></p>` : `<p class="sub">No video${mine ? " yet. Add a YouTube link below." : ". You can add one for a client in their program (click the exercise → Video link)."}</p>`}
+    <p class="sub">${used}</p>
+    ${mine ? `${exFormHTML(m)}<div class="row"><button class="btn primary" data-act="ex-save" data-id="${esc(id)}">Save</button><span class="grow"></span>${uses.length ? `<span class="sub">To delete it, take it out of those programs first.</span>` : `<button class="btn danger" data-act="ex-del" data-id="${esc(id)}">Delete</button>`}</div>` : ""}`);
+}
+function newExerciseModal() {
+  openModal(`<div class="row"><h2 class="grow">New exercise</h2><button class="btn small ghost" data-act="modal-close">Close</button></div>
+    <p class="sub">It’s saved for every coach and shows up when you add an exercise to a program.</p>${exFormHTML(null)}
+    <div class="row"><button class="btn primary" data-act="ex-create">Add exercise</button></div>`);
+  setTimeout(() => $("#nx-name")?.focus(), 30);
+}
+
 /* ---- Gym settings ---- */
 const wuText = (plan) => plan.length ? plan.map((x) => `${fmtW(x.w)}×${x.r}`).join(", ") : "no warm-up sets";
 const fmtW = (w) => String(Math.round(w * 100) / 100);
@@ -659,7 +716,7 @@ function openSettings(bi) { UI.editing = bi; const p = prog(cur()), b = p.days[U
 const cur = () => (location.hash.match(/^#program-(.+)$/) || [])[1];
 
 /* ================= Events ================= */
-let undoSnap = null, removedProg = null;
+let undoSnap = null, removedProg = null, deletedEx = null;
 // Move one week's session of a program to another date (null puts it back on its usual day).
 function moveSession(drag, date) {
   const [pid, ws, did] = String(drag || "").split("|"), w = +ws, pr = db.programs.find((x) => x.id === pid);
@@ -696,6 +753,19 @@ document.addEventListener("click", (ev) => {
     case "reset-sample": db = seed(); save(); UI.confirm = null; renderTop(); route(); toast("Sample data reset."); break;
     case "prog-new": { const np = newProgram(t.dataset.c); UI.day = 0; location.hash = "#program-" + np.id; break; }
     case "prog-dup": UI.confirm = "dup:" + t.dataset.id; route(); break;
+    case "ex-new": newExerciseModal(); break;
+    case "ex-open": openExercise(t.dataset.id); break;
+    case "ex-create": { const v = readExForm(); if (!v) break;
+      const clash = [...Object.values(LIB), ...Object.values(db.custom)].find((m) => m.name.toLowerCase() === v.name.toLowerCase());
+      if (clash) { toast(`“${clash.name}” is already in the list.`); break; }
+      const id = "c_" + v.name.toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 30) + "_" + Math.random().toString(36).slice(2, 5);
+      db.custom[id] = { id, track: "wr", ...v }; save(); closeModal(); route(); toast(`Added “${v.name}”.`); break; }
+    case "ex-save": { const id = t.dataset.id, v = readExForm(); if (!v || !db.custom[id]) break;
+      db.custom[id] = { ...db.custom[id], ...v }; save(); closeModal(); route(); toast("Saved."); break; }
+    case "ex-del": { const id = t.dataset.id; if (!db.custom[id] || exUses(id).length) break;
+      const gone = db.custom[id]; delete db.custom[id]; save(); closeModal(); route();
+      toast(`Deleted “${gone.name}”.`, { act: "ex-undel", label: "Undo" }); deletedEx = gone; break; }
+    case "ex-undel": if (deletedEx) { db.custom[deletedEx.id] = deletedEx; deletedEx = null; save(); route(); $("#toast").hidden = true; } break;
     case "prog-rm": UI.confirm = "rm:" + t.dataset.id; route(); break;
     case "prog-rm-yes": { const i = db.programs.findIndex((x) => x.id === t.dataset.id); if (i < 0) break;
       removedProg = db.programs[i]; db.programs.splice(i, 1); UI.confirm = null; save(); route();
@@ -775,6 +845,7 @@ document.addEventListener("input", (ev) => {
     t.parentElement.classList.toggle("off", !t.value.trim());
     return;
   }
+  if (t.id === "ex-q") { UI.exQ = t.value; $("#ex-list").innerHTML = exListHTML(); return; }
   if (t.id === "pick-q" && UI.picker) { UI.picker.q = t.value; $("#pick-list").innerHTML = pickerHTML(t.value); return; }
   if (t.id === "cnotes") { client(t.dataset.c).notes = t.value; save(); return; }
   if (t.id === "cm-body") { MS.drafts[t.dataset.c] = t.value; return; }
@@ -791,6 +862,7 @@ document.addEventListener("input", (ev) => {
 document.addEventListener("change", (ev) => {
   const t = ev.target, p = cur() ? prog(cur()) : null;
   if (t.id === "me") { if (db.cloud) return; db.me = t.value; save(); route(); return; }
+  if (t.id === "ex-f") { UI.exF = t.value; $("#ex-list").innerHTML = exListHTML(); return; }
   if (["wu-reps", "wu-at", "wu-heavy"].includes(t.id)) {
     db.warmupDefault = P.warmupDefaultOf({ reps: $("#wu-reps").value, heavyAt: +$("#wu-at").value, heavyReps: $("#wu-heavy").value });
     save(); route(); toast("Warm-up default saved. Clients get it the next time their app loads."); return;

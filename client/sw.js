@@ -3,7 +3,7 @@
 const VERSION = "0.8.0";
 const SHELL = `pp-shell-${VERSION}`;
 const RUNTIME = "pp-runtime";
-const ASSETS = ["./", "index.html", "styles.css", "app.js", "exercises.js", "program.js", "sample.js", "supabase.js", "cloud.js", "messages.js", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png", "icons/maskable-512.png"];
+const ASSETS = ["./", "index.html", "styles.css", "app.js", "exercises.js", "videos.js", "program.js", "sample.js", "supabase.js", "cloud.js", "messages.js", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png", "icons/maskable-512.png"];
 
 self.addEventListener("install", (e) => {
   // Take over as soon as the new files are cached, so updates apply on their own.
