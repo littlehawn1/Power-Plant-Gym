@@ -2,7 +2,7 @@
    Data lives on the phone and syncs to the client's account in the gym's Supabase project (see "Account + sync"). */
 (() => {
 "use strict";
-const APP_VERSION = "0.8.0";
+const APP_VERSION = "0.8.1";
 const PP = window.PPProgram;
 const APP_NAME = "Power Plant";
 
@@ -324,7 +324,7 @@ document.addEventListener("visibilitychange", () => { if (document.visibilitySta
 
 /* ================= Exercises ================= */
 function meta(id) { const px = S.program && S.program.exercises && S.program.exercises[id];
-  if (LIB[id] && px) { const o = { ...LIB[id] }; for (const k of ["name", "muscle", "kind", "video"]) if (px[k]) o[k] = px[k]; return o; } // the gym's edits to one of its exercises
+  if (LIB[id] && px) { const o = { ...LIB[id] }; for (const k of ["name", "muscle", "kind", "video", "guide"]) if (px[k]) o[k] = px[k]; return o; } // the gym's edits to one of its exercises
   return LIB[id] || (S.state.custom[id] ? { track: "wr", ...S.state.custom[id], id } : px ? { track: "wr", sets: 3, repsMin: 5, repsMax: 5, kind: "other", muscle: "Other", ...px, id } : null); }
 function getEx(id) {
   const m = meta(id) || { id, name: id, kind: "machine", muscle: "Other", sets: 3, repsMin: 8, repsMax: 12, track: "wr" };
@@ -990,15 +990,23 @@ function openPicker(target) { S.ui.picker = { target, q: "" }; S.ui.newEx = null
 function closePicker() { S.ui.picker = null; S.ui.newEx = null; renderSheet(); }
 function openInfo(id) { S.ui.info = id; renderSheet(); }
 function closeInfo() { S.ui.info = null; renderSheet(); }
+// The coaches' written guide for an exercise (edited on the dashboard), if there is one.
+function guideOf(e) {
+  const g = e && e.guide; if (!g || typeof g !== "object") return null;
+  const arr = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === "string" && x.trim()) : []);
+  const out = { m: Array.isArray(g.m) ? [String(g.m[0] || ""), String(g.m[1] || "")] : null, s: arr(g.s), c: arr(g.c), x: arr(g.x), n: typeof g.n === "string" ? g.n : "" };
+  if (out.m && !out.m[0]) out.m = null;
+  return out.m || out.s.length || out.c.length || out.x.length || out.n ? out : null;
+}
 function renderInfo(id) {
-  const e = getEx(id), g = window.LiftGuide ? window.LiftGuide.info(id) : null, builtIn = !e.custom, tab = S.ui.infoTab || "how";
-  const list = (tag, xs) => `<${tag}>${xs.map((x) => `<li>${esc(x)}</li>`).join("")}</${tag}>`;
+  const e = getEx(id), g = e.guide ? guideOf(e) : window.LiftGuide ? window.LiftGuide.info(id) : null, builtIn = !e.custom, tab = S.ui.infoTab || "how";
+  const list = (tag, xs) => `<${tag}>${xs.map((x) => `<li>${PP.richText(x)}</li>`).join("")}</${tag}>`;
   const body = g ? `
       ${g.m ? `<div class="muscles"><span class="pill good">Works: ${esc(g.m[0])}</span>${g.m[1] ? `<span class="pill">Also: ${esc(g.m[1])}</span>` : ""}</div>` : ""}
-      ${g.n ? `<div class="msg action" style="align-self:stretch">${esc(g.n)}</div>` : ""}
-      <section><h3>How to do it</h3>${list("ol", g.s)}</section>
-      <section><h3>Form cues</h3>${list("ul", g.c)}</section>
-      <section><h3>Common mistakes</h3>${list("ul", g.x)}</section>
+      ${g.n ? `<div class="msg action" style="align-self:stretch">${PP.richText(g.n)}</div>` : ""}
+      ${(g.s || []).length ? `<section><h3>How to do it</h3>${list("ol", g.s)}</section>` : ""}
+      ${(g.c || []).length ? `<section><h3>Form cues</h3>${list("ul", g.c)}</section>` : ""}
+      ${(g.x || []).length ? `<section><h3>Common mistakes</h3>${list("ul", g.x)}</section>` : ""}
       <p class="note">General guidance, not medical advice. Stop if something hurts sharply, and get a coach or physical therapist to check your form if you’re unsure.</p>`
     : builtIn && videoFor(id) ? `<div class="empty">There’s no written guide for this one yet. Follow the coach in the gym’s video above.</div>`
     : `<div class="empty">There’s no written guide for this exercise yet. Keep your own cues under Notes.</div>`;

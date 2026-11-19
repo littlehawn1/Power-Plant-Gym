@@ -498,6 +498,30 @@ function renderExercises() {
       <select class="in" id="ex-f" aria-label="Show"><option value="all">All</option><option value="yours" ${UI.exF === "yours" ? "selected" : ""}>Added by coaches</option><option value="video" ${UI.exF === "video" ? "selected" : ""}>With a video</option><option value="novideo" ${UI.exF === "novideo" ? "selected" : ""}>Without a video</option><option value="changed" ${UI.exF === "changed" ? "selected" : ""}>Gym exercises you edited</option><option value="deleted" ${UI.exF === "deleted" ? "selected" : ""}>Deleted</option></select></div>
     <div id="ex-list">${exListHTML()}</div>`;
 }
+// The written guide clients see under "How to": coaches' version if they wrote one, else the app's.
+const GUIDE = () => window.LiftGuide;
+const baseGuide = (id) => (GUIDE() && LIB[id] && GUIDE().info(id)) || null;
+const guideFor = (id) => { const c = db.custom[id]; return (c && c.guide) || baseGuide(id) || null; };
+const lines = (v) => String(v || "").split("\n").map((x) => x.replace(/^\s*(?:[-•*]|\d+[.)])\s*/, "").trim()).filter(Boolean);
+function guideFormHTML(g) {
+  g = g || {}; const m = g.m || ["", ""], ta = (id, label, v, rows, ph) => `<label class="f" style="grid-column:1/-1">${label}<textarea class="in" id="${id}" rows="${rows}" placeholder="${ph}">${esc((v || []).join("\n"))}</textarea></label>`;
+  return `<h3 style="margin:14px 0 4px">What clients see under “How to”</h3><p class="sub" style="margin:0 0 8px">One step, cue or mistake per line. Leave a box empty to hide that section. **Bold** works.</p>
+    <div class="form2">
+      <label class="f">Works (main muscles)<input class="in" id="g-m0" value="${esc(m[0] || "")}" placeholder="e.g. Quads, glutes"></label>
+      <label class="f">Also works<input class="in" id="g-m1" value="${esc(m[1] || "")}" placeholder="e.g. Lower back, core"></label>
+      <label class="f" style="grid-column:1/-1">Note at the top (optional)<input class="in" id="g-n" value="${esc(g.n || "")}" placeholder="e.g. Use the blue handles on the yoke"></label>
+      ${ta("g-s", "How to do it", g.s, 5, "Set the bar on your upper back…")}
+      ${ta("g-c", "Form cues", g.c, 4, "Brace before you go down")}
+      ${ta("g-x", "Common mistakes", g.x, 3, "Knees caving in")}
+    </div>`;
+}
+function readGuide() {
+  if (!$("#g-s")) return undefined;
+  const g = { m: [$("#g-m0").value.trim(), $("#g-m1").value.trim()], s: lines($("#g-s").value), c: lines($("#g-c").value), x: lines($("#g-x").value), n: $("#g-n").value.trim() };
+  return g.m[0] || g.m[1] || g.s.length || g.c.length || g.x.length || g.n ? g : null;
+}
+const sameGuide = (a, b) => JSON.stringify(normG(a)) === JSON.stringify(normG(b));
+const normG = (g) => g ? { m: [(g.m || [])[0] || "", (g.m || [])[1] || ""], s: g.s || [], c: g.c || [], x: g.x || [], n: g.n || "" } : null;
 function exFormHTML(m) {
   const f = (m && m.fields) || ["w", "r"], cats = [...new Set([...LIBR.MUSCLES, "Strongman", "Mobility", "Warm-up", ...allEx().map((x) => x.muscle)])].filter(Boolean);
   return `<div class="form2">
@@ -506,12 +530,14 @@ function exFormHTML(m) {
       <label class="f">Equipment<input class="in" id="nx-kind" value="${esc((m && m.kind) || "strongman")}" list="kinds"><datalist id="kinds">${LIBR.KINDS.map((x) => `<option value="${x}">`).join("")}</datalist></label>
       <label class="f">YouTube link (optional)<input class="in" id="nx-video" value="${esc((m && m.video) || "")}" placeholder="https://youtu.be/…"></label>
       <div class="fields" style="grid-column:1/-1"><span class="sub">Clients record:</span>${Object.entries(LIBR.FIELD_NAMES).map(([k, n]) => `<label><input type="checkbox" class="nx-f" value="${k}" ${f.includes(k) ? "checked" : ""}> ${n}</label>`).join("")}</div>
-    </div>`;
+    </div>${guideFormHTML(m && m.id ? guideFor(m.id) : null)}`;
 }
 function readExForm() {
   const name = ($("#nx-name").value || "").trim(); if (!name) { toast("Give the exercise a name."); return null; }
   const fields = [...document.querySelectorAll(".nx-f:checked")].map((x) => x.value);
-  return { name, muscle: $("#nx-muscle").value.trim() || "Other", kind: $("#nx-kind").value.trim().toLowerCase() || "other", video: $("#nx-video").value.trim(), fields: fields.length ? fields : ["w", "r"] };
+  const out = { name, muscle: $("#nx-muscle").value.trim() || "Other", kind: $("#nx-kind").value.trim().toLowerCase() || "other", video: $("#nx-video").value.trim(), fields: fields.length ? fields : ["w", "r"] };
+  const g = readGuide(); if (g !== undefined) out.guide = g;
+  return out;
 }
 function openExercise(id) {
   const m = exMeta(id), mine = !isBuiltIn(id), changed = !mine && db.custom[id], v = videoOf(m), uses = exUses(id);
@@ -770,7 +796,7 @@ document.addEventListener("click", (ev) => {
       if (clash && clash.deleted) { toast(`“${clash.name}” was deleted. Restore it from the Deleted filter.`); break; }
       if (clash) { toast(`“${clash.name}” is already in the list.`); break; }
       const id = "c_" + v.name.toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 30) + "_" + Math.random().toString(36).slice(2, 5);
-      db.custom[id] = { id, track: "wr", ...v }; save(); closeModal(); route(); toast(`Added “${v.name}”.`); break; }
+      db.custom[id] = { id, track: "wr", ...v }; if (!v.guide) delete db.custom[id].guide; save(); closeModal(); route(); toast(`Added “${v.name}”.`); break; }
     case "ex-save": { const id = t.dataset.id, v = readExForm(); if (!v) break;
       const clash = allEx(true).find((m) => m.id !== id && m.name.toLowerCase() === v.name.toLowerCase());
       if (clash) { toast(`Another exercise is already called “${clash.name}”.`); break; }
@@ -779,8 +805,9 @@ document.addEventListener("click", (ev) => {
         if (v.name !== l.name) o.name = v.name; if (v.muscle !== l.muscle) o.muscle = v.muscle; if (v.kind !== l.kind) o.kind = v.kind;
         if (v.video !== (GYMV[id] || "")) o.video = v.video; if (v.fields.join() !== defaultFields(id).join() || (db.custom[id] && db.custom[id].fields)) o.fields = v.fields;
         if (o.fields && o.fields.join() === (LIBR.TRACK_FIELDS[l.track || "wr"] || ["w", "r"]).join()) delete o.fields;
+        if (!sameGuide(v.guide, baseGuide(id))) o.guide = v.guide || { m: ["", ""], s: [], c: [], x: [], n: "" };
         if (Object.keys(o).length > 1) db.custom[id] = o; else delete db.custom[id];
-      } else db.custom[id] = { ...db.custom[id], ...v };
+      } else { db.custom[id] = { ...db.custom[id], ...v }; if (!v.guide) delete db.custom[id].guide; }
       save(); closeModal(); route(); toast("Saved."); break; }
     case "ex-reset": delete db.custom[t.dataset.id]; save(); closeModal(); route(); toast("Back to the gym’s original."); break;
     case "ex-del": { const id = t.dataset.id; if (exUses(id).length) break;
