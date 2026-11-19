@@ -204,3 +204,7 @@ table.maxt { width: 100%; border-collapse: collapse; font-size: 14px; }
 .sc-week:last-child { border-bottom: 0; }
 .sc-wh, .sc-day { display: flex; gap: 8px; align-items: center; padding: 3px 0; }
 .sc-day { padding-left: 22px; }
+.cw { position: relative; }
+.cw-x { position: absolute; top: 2px; right: 2px; border: 0; background: none; color: inherit; opacity: .45; font-size: 15px; line-height: 1; padding: 2px 4px; cursor: pointer; border-radius: 4px; }
+.cw-x:hover, .cw-x:focus-visible { opacity: 1; background: var(--sunken); color: var(--bad); }
+.cw.drag b { padding-right: 14px; }

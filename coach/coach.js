@@ -419,14 +419,14 @@ function calendarHTML(c) {
     }
     for (const l of logs.filter((x) => !used.has(x.id) && x.date.slice(0, 10) === k)) { used.add(l.id); items.push({ title: l.name, status: "done", log: l }); }
     cells.push(`<div class="cday${inMonth ? "" : " out"}${k === today ? " today" : ""}" data-date="${k}"><div class="cd-hd"><span>${d.getDate()}</span><button class="flagbtn${notes[k] ? " on" : ""}" data-act="daynote" data-c="${c.id}" data-d="${k}" title="${notes[k] ? esc(notes[k]) : "Add a private note (only coaches see it)"}" aria-label="Private note for ${k}">⚑</button></div>
-      ${items.map((it) => `<div class="cw ${it.status}${it.drag ? " drag" : ""}"${it.drag ? ` draggable="true" data-drag="${it.drag}" data-act="wk-move" data-c="${c.id}" tabindex="0" role="button" title="Drag to another day to move it, or click to pick a date"` : ""}><b>${esc(it.title)}${it.moved ? ` <span class="moved" title="Moved from its usual day">↷</span>` : ""}</b>${it.note ? `<div class="cwn">${esc(it.note)}</div>` : ""}
+      ${items.map((it) => `<div class="cw ${it.status}${it.drag ? " drag" : ""}"${it.drag ? ` draggable="true" data-drag="${it.drag}" data-act="wk-move" data-c="${c.id}" tabindex="0" role="button" title="Drag to another day to move it, or click to pick a date"` : ""}><b>${esc(it.title)}${it.moved ? ` <span class="moved" title="Moved from its usual day">↷</span>` : ""}</b>${it.drag ? `<button class="cw-x" data-act="wk-off" data-drag="${it.drag}" title="Remove from calendar" aria-label="Remove ${esc(it.title)} from the calendar">×</button>` : ""}${it.note ? `<div class="cwn">${esc(it.note)}</div>` : ""}
         ${it.log ? (it.log.exercises || []).map((e) => `<div class="cx"><span class="ck ${(e.sets || []).length ? "y" : "n"}">${(e.sets || []).length ? "✓" : "✗"}</span><span>${esc(exMeta(e.ex).name)}<br><span class="sub num">${esc(setsText(e) || "–")}</span></span></div>`).join("")
           : (it.rx || []).map((x) => `<div class="cx"><span class="ck">${it.status === "missed" ? "✗" : "·"}</span><span>${esc(exMeta(x.ex).name)}</span></div>`).join("")}</div>`).join("")}
     </div>`);
   }
   const label = first.toLocaleDateString(undefined, { month: "long", year: "numeric" });
   return `<section class="panel"><div class="row"><button class="btn small" data-act="cal-move" data-d="-1" aria-label="Previous month">‹</button><h2 class="grow" style="text-align:center">${label}</h2><button class="btn small" data-act="cal-move" data-d="1" aria-label="Next month">›</button><button class="btn small ghost" data-act="cal-today">Today</button></div>
-    <div class="cal-key sub"><span class="cw done">Completed</span><span class="cw missed">Missed</span><span class="cw up">Upcoming</span><span>⚑ private coach note</span><span>Drag a workout to move it</span></div>
+    <div class="cal-key sub"><span class="cw done">Completed</span><span class="cw missed">Missed</span><span class="cw up">Upcoming</span><span>⚑ private coach note</span><span>Drag a workout to move it · × removes it</span></div>
     <div class="cal">${["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((x) => `<div class="cdow">${x}</div>`).join("")}${cells.join("")}</div></section>`;
 }
 
@@ -767,7 +767,18 @@ function moveSession(drag, date) {
   save(); route();
   toast(date || usual ? `Moved ${dd.name} (week ${w + 1}) to ${dateLabel(date || usual)}.` : `Took ${dd.name} (week ${w + 1}) off the calendar.`, { act: "undo", label: "Undo" });
 }
-function fixDatedStart(pr) { const ds = Object.values(pr.moves || {}).filter(Boolean).sort(); if (ds.length) pr.startDate = ds[0]; }
+function fixDatedStart(pr) { const ds = Object.values(pr.moves || {}).filter((v) => /^\d{4}-\d{2}-\d{2}$/.test(v)).sort(); if (ds.length) pr.startDate = ds[0]; }
+// Take one session off a client's calendar (and out of their app). Logged workouts are never touched.
+function removeSession(drag) {
+  const [pid, ws, did] = String(drag || "").split("|"), w = +ws, pr = db.programs.find((x) => x.id === pid);
+  const dd = pr && pr.days.find((x) => x.id === did); if (!dd) return;
+  undoSnap = clone(pr); pr.moves = { ...(pr.moves || {}) };
+  const key = P.moveKey(w, dd); if (pr.schedule === "dated") delete pr.moves[key]; else pr.moves[key] = "off";
+  if (!Object.keys(pr.moves).length) delete pr.moves;
+  if (pr.schedule === "dated") fixDatedStart(pr);
+  save(); route();
+  toast(`Removed ${dd.name} (week ${w + 1}) from the calendar.`, { act: "undo", label: "Undo" });
+}
 
 /* ---- Add workouts to a client's calendar (pick a program, tick workouts, pick days) ---- */
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -893,12 +904,13 @@ document.addEventListener("click", (ev) => {
     case "wk-move": { const [pid, w, did] = t.dataset.drag.split("|"), pr = prog(pid); if (!pr) break;
       const dd = pr.days.find((x) => x.id === did); if (!dd) break;
       const cur = P.movedDate(pr, +w, dd) || P.dayDate(pr, +w, dd);
-      openModal(`<div class="row"><h2 class="grow">Move ${esc(dd.name)} · week ${+w + 1}</h2><button class="btn small ghost" data-act="modal-close">Close</button></div>
+      openModal(`<div class="row"><h2 class="grow">Move or remove ${esc(dd.name)} · week ${+w + 1}</h2><button class="btn small ghost" data-act="modal-close">Close</button></div>
         <p class="sub">Only this week’s ${esc(dd.name)} moves. The client sees it on the new date in their app. You can also drag workouts on the calendar.</p>
         <label class="f">New date<input class="in" type="date" id="mv-date" value="${cur}" data-drag="${esc(t.dataset.drag)}"></label>
-        <div class="row"><button class="btn primary" data-act="mv-save">Move</button>${pr.schedule === "dated" ? `<button class="btn" data-act="mv-off">Take it off the calendar</button>` : ""}${P.movedDate(pr, +w, dd) && P.dayDate(pr, +w, dd) ? `<button class="btn" data-act="mv-reset">Put back on ${esc(dateLabel(P.dayDate(pr, +w, dd)))}</button>` : ""}</div>`);
+        <div class="row"><button class="btn primary" data-act="mv-save">Move</button><button class="btn danger" data-act="mv-off">Remove from calendar</button>${P.movedDate(pr, +w, dd) && P.dayDate(pr, +w, dd) ? `<button class="btn" data-act="mv-reset">Put back on ${esc(dateLabel(P.dayDate(pr, +w, dd)))}</button>` : ""}</div>`);
       break; }
-    case "mv-off": { const inp = $("#mv-date"); moveSession(inp.dataset.drag, null); closeModal(); break; }
+    case "mv-off": { const inp = $("#mv-date"); removeSession(inp.dataset.drag); closeModal(); break; }
+    case "wk-off": ev.stopPropagation(); removeSession(t.dataset.drag); break;
     case "mv-save": case "mv-reset": { const inp = $("#mv-date"); moveSession(inp.dataset.drag, a === "mv-reset" ? null : inp.value); closeModal(); break; }
     case "dup-yes": {
       const src = prog(t.dataset.id), np = clone(src), to = $("#dup-to").value; np.id = pid(); np.coach = me().name; delete np.moves;

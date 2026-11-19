@@ -139,6 +139,8 @@
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }
   // A coach can move one week's session to another date (dragged on the calendar). Kept as { "<week>:<day id>": "YYYY-MM-DD" }.
+  // "off" instead of a date means the coach took that session off the calendar.
+  const isOff = (program, w, day) => !!(program && program.moves && program.moves[moveKey(w, day)] === "off");
   const moveKey = (w, day) => `${w}:${day.id}`;
   function movedDate(program, w, day) {
     const m = program && program.moves; if (!m || (program.schedule !== "weekly" && program.schedule !== "dated")) return null;
@@ -150,7 +152,7 @@
     const weeks = [];
     for (let w = 0; w < program.weeks; w++) {
       const days = program.days.map((day) => ({
-        id: day.id, name: day.name, weekday: day.weekday, date: movedDate(program, w, day) || dayDate(program, w, day), moved: program.schedule === "weekly" && !!movedDate(program, w, day), note: day.note || "", warmup: day.warmup || "", cooldown: day.cooldown || "",
+        id: day.id, name: day.name, weekday: day.weekday, date: movedDate(program, w, day) || dayDate(program, w, day), moved: program.schedule === "weekly" && !!movedDate(program, w, day), off: isOff(program, w, day), note: day.note || "", warmup: day.warmup || "", cooldown: day.cooldown || "",
         items: day.blocks.map((b) => {
           const cell = (b.weeks || [])[w] || ""; if (!cell.trim() || /^(skip|off|none|n\/a|-+|—)$/i.test(cell.trim())) return null;
           const rx = parsePrescription(cell);
@@ -158,7 +160,7 @@
           // Cells that aren't all shorthand are shown word for word; whatever could be read still sets up the logging rows.
           return { ex: b.ex, warmup: b.warmup || "", text: rx.errors.length || rx.loose ? cell.trim() : "", groups: rx.groups, tempo: rx.tempo, pause: rx.pause, rest: b.rest || 0, note: [b.note, wn].filter(Boolean).join(" "), group: b.group || null, video: b.video || "", fields: b.fields || null, format: b.format || null, warmupSets: !!b.warmupSets, sets: rx.groups.reduce((n, g) => n + g.sets, 0) };
         }).filter(Boolean),
-      })).filter((d) => (d.items.length || d.warmup || d.cooldown) && (program.schedule !== "dated" || d.date)); // a "dated" program only runs the workouts put on the calendar
+      })).filter((d) => (d.items.length || d.warmup || d.cooldown) && (program.schedule !== "dated" || d.date) && !d.off); // a "dated" program only runs the workouts put on the calendar
       weeks.push({ note: (program.weekNotes || [])[w] || "", days });
     }
     return { warmupDefault: program.warmupDefault || null, id: program.id, name: program.name, coach: program.coach, schedule: program.schedule, startDate: program.startDate, sample: !!program.sample, maxes: program.maxes || null, weeks };
@@ -224,7 +226,7 @@
   // **bold** in coach notes; everything else is escaped.
   const richText = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>");
 
-  const api = { WARMUP_DEFAULT, warmupDefaultOf, parseWarmup, warmupPlan, moveKey, movedDate, parsePrescription, parseLoad, prescriptionText, groupText, loadText, formatText, compile, dayDate, mmss, WEEKDAYS, ceilTo, roundStep, est1RM, targetOf, pctOf, richText };
+  const api = { isOff, WARMUP_DEFAULT, warmupDefaultOf, parseWarmup, warmupPlan, moveKey, movedDate, parsePrescription, parseLoad, prescriptionText, groupText, loadText, formatText, compile, dayDate, mmss, WEEKDAYS, ceilTo, roundStep, est1RM, targetOf, pctOf, richText };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   root.PPProgram = api;
 })(typeof window !== "undefined" ? window : globalThis);
