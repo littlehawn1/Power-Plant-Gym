@@ -138,13 +138,19 @@
     const d = new Date(start.getTime() + (w * 7 + toWeekday) * 864e5);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }
+  // A coach can move one week's session to another date (dragged on the calendar). Kept as { "<week>:<day id>": "YYYY-MM-DD" }.
+  const moveKey = (w, day) => `${w}:${day.id}`;
+  function movedDate(program, w, day) {
+    const m = program && program.moves; if (!m || program.schedule !== "weekly") return null;
+    const v = m[moveKey(w, day)]; return typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null;
+  }
   // Turns a coach program (v2) into the week-by-week list the client app runs.
   function compile(program) {
     if (!program || program.v !== 2) return program; // older programs are already in week form
     const weeks = [];
     for (let w = 0; w < program.weeks; w++) {
       const days = program.days.map((day) => ({
-        id: day.id, name: day.name, weekday: day.weekday, date: dayDate(program, w, day), note: day.note || "", warmup: day.warmup || "", cooldown: day.cooldown || "",
+        id: day.id, name: day.name, weekday: day.weekday, date: movedDate(program, w, day) || dayDate(program, w, day), moved: !!movedDate(program, w, day), note: day.note || "", warmup: day.warmup || "", cooldown: day.cooldown || "",
         items: day.blocks.map((b) => {
           const cell = (b.weeks || [])[w] || ""; if (!cell.trim() || /^(skip|off|none|n\/a|-+|—)$/i.test(cell.trim())) return null;
           const rx = parsePrescription(cell);
@@ -168,7 +174,7 @@
   // **bold** in coach notes; everything else is escaped.
   const richText = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>");
 
-  const api = { parsePrescription, parseLoad, prescriptionText, groupText, loadText, formatText, compile, dayDate, mmss, WEEKDAYS, ceilTo, roundStep, est1RM, targetOf, pctOf, richText };
+  const api = { moveKey, movedDate, parsePrescription, parseLoad, prescriptionText, groupText, loadText, formatText, compile, dayDate, mmss, WEEKDAYS, ceilTo, roundStep, est1RM, targetOf, pctOf, richText };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   root.PPProgram = api;
 })(typeof window !== "undefined" ? window : globalThis);

@@ -179,3 +179,10 @@ table.maxt { width: 100%; border-collapse: collapse; font-size: 14px; }
 .cal-key { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 .cal-key .cw { padding: 2px 8px; }
 @media (prefers-color-scheme: dark) { .cw.done b, .cx .ck.y { color: #6fcf97; } .cw.done { border-left-color: #6fcf97; } }
+
+/* Moving workouts on the calendar */
+.cw.drag { cursor: grab; }
+.cw.drag:hover { outline: 1px solid var(--line); }
+.cw.dragging { opacity: .45; }
+.cday.drop-on { outline: 2px dashed #f07521; outline-offset: -2px; }
+.cw .moved { color: #f07521; font-weight: 600; }

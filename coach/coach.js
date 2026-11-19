@@ -408,18 +408,18 @@ function calendarHTML(c) {
     for (const s of sched.filter((x) => x.date === k)) {
       const l = logs.find((x) => x.prog && x.prog.id === s.p.id && x.prog.w === s.w && x.prog.d === s.d);
       if (l) used.add(l.id);
-      items.push({ title: `${s.day.name}`, note: s.day.note, status: l ? "done" : k < today ? "missed" : "up", log: l, rx: s.day.items });
+      items.push({ title: `${s.day.name}`, note: s.day.note, status: l ? "done" : k < today ? "missed" : "up", log: l, rx: s.day.items, drag: l ? "" : `${s.p.id}|${s.w}|${s.day.id}`, moved: s.day.moved });
     }
     for (const l of logs.filter((x) => !used.has(x.id) && x.date.slice(0, 10) === k)) { used.add(l.id); items.push({ title: l.name, status: "done", log: l }); }
-    cells.push(`<div class="cday${inMonth ? "" : " out"}${k === today ? " today" : ""}"><div class="cd-hd"><span>${d.getDate()}</span><button class="flagbtn${notes[k] ? " on" : ""}" data-act="daynote" data-c="${c.id}" data-d="${k}" title="${notes[k] ? esc(notes[k]) : "Add a private note (only coaches see it)"}" aria-label="Private note for ${k}">⚑</button></div>
-      ${items.map((it) => `<div class="cw ${it.status}"><b>${esc(it.title)}</b>${it.note ? `<div class="cwn">${esc(it.note)}</div>` : ""}
+    cells.push(`<div class="cday${inMonth ? "" : " out"}${k === today ? " today" : ""}" data-date="${k}"><div class="cd-hd"><span>${d.getDate()}</span><button class="flagbtn${notes[k] ? " on" : ""}" data-act="daynote" data-c="${c.id}" data-d="${k}" title="${notes[k] ? esc(notes[k]) : "Add a private note (only coaches see it)"}" aria-label="Private note for ${k}">⚑</button></div>
+      ${items.map((it) => `<div class="cw ${it.status}${it.drag ? " drag" : ""}"${it.drag ? ` draggable="true" data-drag="${it.drag}" data-act="wk-move" data-c="${c.id}" tabindex="0" role="button" title="Drag to another day to move it, or click to pick a date"` : ""}><b>${esc(it.title)}${it.moved ? ` <span class="moved" title="Moved from its usual day">↷</span>` : ""}</b>${it.note ? `<div class="cwn">${esc(it.note)}</div>` : ""}
         ${it.log ? (it.log.exercises || []).map((e) => `<div class="cx"><span class="ck ${(e.sets || []).length ? "y" : "n"}">${(e.sets || []).length ? "✓" : "✗"}</span><span>${esc(exMeta(e.ex).name)}<br><span class="sub num">${esc(setsText(e) || "–")}</span></span></div>`).join("")
           : (it.rx || []).map((x) => `<div class="cx"><span class="ck">${it.status === "missed" ? "✗" : "·"}</span><span>${esc(exMeta(x.ex).name)}</span></div>`).join("")}</div>`).join("")}
     </div>`);
   }
   const label = first.toLocaleDateString(undefined, { month: "long", year: "numeric" });
   return `<section class="panel"><div class="row"><button class="btn small" data-act="cal-move" data-d="-1" aria-label="Previous month">‹</button><h2 class="grow" style="text-align:center">${label}</h2><button class="btn small" data-act="cal-move" data-d="1" aria-label="Next month">›</button><button class="btn small ghost" data-act="cal-today">Today</button></div>
-    <div class="cal-key sub"><span class="cw done">Completed</span><span class="cw missed">Missed</span><span class="cw up">Upcoming</span><span>⚑ private coach note</span></div>
+    <div class="cal-key sub"><span class="cw done">Completed</span><span class="cw missed">Missed</span><span class="cw up">Upcoming</span><span>⚑ private coach note</span><span>Drag a workout to move it</span></div>
     <div class="cal">${["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((x) => `<div class="cdow">${x}</div>`).join("")}${cells.join("")}</div></section>`;
 }
 
@@ -427,7 +427,8 @@ function renderClient(cid) {
   setNav("clients");
   const c = client(cid), logs = logsOf(cid), tab = UI.clientTab || "calendar";
   const progs = programsOf(cid).map((p) => `<div class="pitem"><div class="grow"><b>${esc(p.name)}</b><div class="sub">${p.weeks} weeks · ${p.days.length} days/week · ${p.schedule === "weekly" ? "scheduled by day" : "any order"} · ${esc(programWeekNow(p) || "")}</div></div>
-      <a class="btn small primary" href="#program-${p.id}" style="text-decoration:none">Edit</a><button class="btn small" data-act="prog-dup" data-id="${p.id}">Copy…</button></div>`).join("");
+      <a class="btn small primary" href="#program-${p.id}" style="text-decoration:none">Edit</a><button class="btn small" data-act="prog-dup" data-id="${p.id}">Copy…</button><button class="btn small ghost" data-act="prog-rm" data-id="${p.id}">Remove</button></div>
+      ${UI.confirm === "rm:" + p.id ? `<div class="panel" style="background:var(--sunken)"><b>Remove “${esc(p.name)}” from ${esc(c.name)}?</b><div class="sub">Its workouts come off their calendar and app. Workouts they already logged stay.</div><div class="row"><button class="btn small danger" data-act="prog-rm-yes" data-id="${p.id}">Remove</button><button class="btn small ghost" data-act="cancel">Cancel</button></div></div>` : ""}`).join("");
   const dup = UI.confirm && UI.confirm.startsWith("dup:") ? db.programs.find((p) => p.id === UI.confirm.slice(4)) : null;
   const tpls = db.programs.filter((p) => p.template);
   $("#view").innerHTML = `<div class="row"><a href="#clients" class="btn small ghost" style="text-decoration:none">← Clients</a><span class="grow"></span>
@@ -621,7 +622,27 @@ function openSettings(bi) { UI.editing = bi; const p = prog(cur()), b = p.days[U
 const cur = () => (location.hash.match(/^#program-(.+)$/) || [])[1];
 
 /* ================= Events ================= */
-let undoSnap = null;
+let undoSnap = null, removedProg = null;
+// Move one week's session of a program to another date (null puts it back on its usual day).
+function moveSession(drag, date) {
+  const [pid, ws, did] = String(drag || "").split("|"), w = +ws, pr = db.programs.find((x) => x.id === pid);
+  const dd = pr && pr.days.find((x) => x.id === did); if (!dd) return;
+  const usual = P.dayDate(pr, w, dd), key = P.moveKey(w, dd);
+  if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+  if ((P.movedDate(pr, w, dd) || usual) === (date || usual)) return;
+  undoSnap = clone(pr); pr.moves = { ...(pr.moves || {}) };
+  if (!date || date === usual) delete pr.moves[key]; else pr.moves[key] = date;
+  if (!Object.keys(pr.moves).length) delete pr.moves;
+  save(); route();
+  toast(`Moved ${dd.name} (week ${w + 1}) to ${dateLabel(date || usual)}.`, { act: "undo", label: "Undo" });
+}
+// Drag and drop on the client calendar.
+let dragKey = null;
+document.addEventListener("dragstart", (ev) => { const el = ev.target.closest && ev.target.closest("[data-drag]"); if (!el) return; dragKey = el.dataset.drag; ev.dataTransfer.effectAllowed = "move"; try { ev.dataTransfer.setData("text/plain", dragKey); } catch {} el.classList.add("dragging"); });
+document.addEventListener("dragend", () => { dragKey = null; document.querySelectorAll(".dragging,.drop-on").forEach((x) => x.classList.remove("dragging", "drop-on")); });
+document.addEventListener("dragover", (ev) => { if (!dragKey) return; const cell = ev.target.closest && ev.target.closest(".cday[data-date]"); if (!cell) return; ev.preventDefault(); ev.dataTransfer.dropEffect = "move";
+  document.querySelectorAll(".drop-on").forEach((x) => x !== cell && x.classList.remove("drop-on")); cell.classList.add("drop-on"); });
+document.addEventListener("drop", (ev) => { if (!dragKey) return; const cell = ev.target.closest && ev.target.closest(".cday[data-date]"); if (!cell) return; ev.preventDefault(); const k = dragKey; dragKey = null; moveSession(k, cell.dataset.date); });
 document.addEventListener("click", (ev) => {
   const t = ev.target.closest("[data-act]"); if (!t) return;
   const a = t.dataset.act;
@@ -638,12 +659,26 @@ document.addEventListener("click", (ev) => {
     case "reset-sample": db = seed(); save(); UI.confirm = null; renderTop(); route(); toast("Sample data reset."); break;
     case "prog-new": { const np = newProgram(t.dataset.c); UI.day = 0; location.hash = "#program-" + np.id; break; }
     case "prog-dup": UI.confirm = "dup:" + t.dataset.id; route(); break;
+    case "prog-rm": UI.confirm = "rm:" + t.dataset.id; route(); break;
+    case "prog-rm-yes": { const i = db.programs.findIndex((x) => x.id === t.dataset.id); if (i < 0) break;
+      removedProg = db.programs[i]; db.programs.splice(i, 1); UI.confirm = null; save(); route();
+      toast(`Removed “${removedProg.name}”.`, { act: "prog-restore", label: "Undo" }); break; }
+    case "prog-restore": if (removedProg) { db.programs.push(removedProg); removedProg = null; save(); route(); $("#toast").hidden = true; } break;
+    case "wk-move": { const [pid, w, did] = t.dataset.drag.split("|"), pr = prog(pid); if (!pr) break;
+      const dd = pr.days.find((x) => x.id === did); if (!dd) break;
+      const cur = P.movedDate(pr, +w, dd) || P.dayDate(pr, +w, dd);
+      openModal(`<div class="row"><h2 class="grow">Move ${esc(dd.name)} · week ${+w + 1}</h2><button class="btn small ghost" data-act="modal-close">Close</button></div>
+        <p class="sub">Only this week’s ${esc(dd.name)} moves. The client sees it on the new date in their app. You can also drag workouts on the calendar.</p>
+        <label class="f">New date<input class="in" type="date" id="mv-date" value="${cur}" data-drag="${esc(t.dataset.drag)}"></label>
+        <div class="row"><button class="btn primary" data-act="mv-save">Move</button>${P.movedDate(pr, +w, dd) ? `<button class="btn" data-act="mv-reset">Put back on ${esc(dateLabel(P.dayDate(pr, +w, dd)))}</button>` : ""}</div>`);
+      break; }
+    case "mv-save": case "mv-reset": { const inp = $("#mv-date"); moveSession(inp.dataset.drag, a === "mv-reset" ? null : inp.value); closeModal(); break; }
     case "dup-yes": {
-      const src = prog(t.dataset.id), np = clone(src), to = $("#dup-to").value; np.id = pid(); np.coach = me().name;
+      const src = prog(t.dataset.id), np = clone(src), to = $("#dup-to").value; np.id = pid(); np.coach = me().name; delete np.moves;
       if (to === "__tpl") { np.clientId = null; np.template = true; np.name = src.name; } else { np.clientId = to; np.template = false; np.name = src.template ? src.name : src.name + " (copy)"; }
       db.programs.push(np); save(); UI.confirm = null; location.hash = "#program-" + np.id; toast(to === "__tpl" ? "Saved to Saved programs." : `Copied to ${client(np.clientId).name}. Set the start date and adjust anything for them.`); break;
     }
-    case "save-tpl": { const np = clone(p); np.id = pid(); np.clientId = null; np.template = true; db.programs.push(np); save(); route(); toast(`“${p.name}” added to Saved programs.`); break; }
+    case "save-tpl": { const np = clone(p); np.id = pid(); delete np.moves; np.clientId = null; np.template = true; db.programs.push(np); save(); route(); toast(`“${p.name}” added to Saved programs.`); break; }
     case "tpl-new": { const np = newProgram(null); np.template = true; np.name = "New saved program"; save(); UI.day = 0; location.hash = "#program-" + np.id; break; }
     case "day-copy": UI.confirm = "day-copy"; route(); break;
     case "day-copy-yes": { const dest = prog($("#daycopy-to").value); if (!dest) break; const nd = clone(day); nd.id = uid("d"); nd.blocks.forEach((b) => { b.id = uid("b"); b.weeks = (b.weeks || []).slice(0, dest.weeks); while (b.weeks.length < dest.weeks) b.weeks.push(""); }); dest.days.push(nd); save(); UI.confirm = null; route(); toast(`Copied ${day.name} into “${dest.name}”.`); break; }
