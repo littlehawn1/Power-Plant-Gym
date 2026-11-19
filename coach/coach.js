@@ -466,7 +466,7 @@ function renderFeed() {
 function renderTemplates() {
   setNav("templates");
   const t = db.programs.filter((p) => p.template);
-  $("#view").innerHTML = `<div class="row"><div class="grow"><div class="eyebrow">Reusable programs you can copy to any client</div><h1>Saved programs</h1></div><button class="btn primary" data-act="tpl-new">+ New saved program</button></div>
+  $("#view").innerHTML = `<div class="row"><div class="grow"><div class="eyebrow">Reusable programs you can copy to any client</div><h1>Saved programs</h1></div><label class="btn" style="cursor:pointer">Import programs file<input type="file" id="tplfile" accept=".json,application/json" hidden></label><button class="btn primary" data-act="tpl-new">+ New saved program</button></div>
     <div class="plist">${t.map((p) => `<div class="pitem panel" style="flex-direction:row"><div class="grow"><b>${esc(p.name)}</b><div class="sub">${p.weeks} weeks · ${p.days.length} days/week</div></div><a class="btn small primary" href="#program-${p.id}" style="text-decoration:none">Edit</a><button class="btn small" data-act="prog-dup" data-id="${p.id}">Copy to a client…</button></div>`).join("") || `<div class="empty">No saved programs yet. Open any client’s program and choose <b>Save as a saved program</b>, or start a new one here.</div>`}</div>
     ${UI.confirm && UI.confirm.startsWith("dup:") ? (() => { const dup = prog(UI.confirm.slice(4)); return `<div class="panel"><b>Copy “${esc(dup.name)}” to:</b><select class="in" id="dup-to">${db.clients.map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join("")}</select><div class="row"><button class="btn small primary" data-act="dup-yes" data-id="${dup.id}">Make a copy</button><button class="btn small ghost" data-act="cancel">Cancel</button></div></div>`; })() : ""}`;
 }
@@ -758,6 +758,23 @@ document.addEventListener("change", (ev) => {
   if (t.id === "mx-tpl" && t.value) { const c = client(t.dataset.c), tp = db.maxTemplates.find((x) => x.id === t.value); for (const id of tp.lifts) c.maxes[id] = c.maxes[id] || {}; save(); route(); return; }
   if (t.id === "from-tpl" && t.value) { const src = prog(t.value), np = clone(src); np.id = pid(); np.clientId = t.dataset.c; np.template = false; np.coach = me().name; db.programs.push(np); save(); UI.day = 0; location.hash = "#program-" + np.id; toast("Copied. Set the start date and adjust anything for this client."); return; }
   if (t.id === "feed-flag") { UI.feedFlagged = t.checked; route(); return; }
+  if (t.id === "tplfile") {
+    // A file of saved programs made from another coaching app (e.g. the TrueCoach import). Adding the same file twice adds nothing new.
+    const f = t.files && t.files[0]; if (!f) return;
+    f.text().then((txt) => {
+      const d = JSON.parse(txt); if (!d || d.app !== "powerplant-templates" || !Array.isArray(d.programs)) throw new Error("bad");
+      const key = (p) => p.source ? `${p.source.from}:${p.source.programId}:${p.source.part || 1}` : null;
+      const have = new Set(db.programs.map(key).filter(Boolean)); let n = 0, ex = 0;
+      for (const [id, e] of Object.entries(d.custom || {})) if (!db.custom[id] && !LIB[id]) { db.custom[id] = e; ex++; }
+      for (const p of d.programs) {
+        if (p.v !== 2 || !Array.isArray(p.days) || have.has(key(p))) continue;
+        db.programs.push({ ...p, id: pid(), template: true, clientId: null }); n++;
+      }
+      save(); route(); toast(n || ex ? `Added ${n} saved program${n === 1 ? "" : "s"} and ${ex} exercise${ex === 1 ? "" : "s"}.` : "Everything in that file is already here.");
+    }).catch(() => toast("That isn’t a saved-programs file."));
+    t.value = "";
+    return;
+  }
   if (t.id === "logfile") {
     const f = t.files && t.files[0], cid = t.dataset.c; if (!f) return;
     f.text().then((txt) => {
