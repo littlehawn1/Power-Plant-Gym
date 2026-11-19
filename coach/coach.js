@@ -492,7 +492,7 @@ function exListHTML() {
 function renderExercises() {
   setNav("exercises");
   const n = allEx().length;
-  $("#view").innerHTML = `<div class="row"><h1 class="grow">Exercises</h1><button class="btn primary" data-act="ex-new">+ New exercise</button></div>
+  $("#view").innerHTML = `<div class="row"><h1 class="grow">Exercises</h1><button class="btn" data-act="ex-export">Download exercise list</button><button class="btn primary" data-act="ex-new">+ New exercise</button></div>
     <p class="sub">All ${n} exercises coaches can put in a program. The gym’s exercises come with the app, and many have a video from the gym’s YouTube channel. Click any exercise to change its name, category, equipment, video or what clients record, or to delete it. Changes are saved for every coach and reach clients with their programs.</p>
     <div class="row"><input class="in grow" id="ex-q" placeholder="Search by name, muscle or equipment" value="${esc(UI.exQ || "")}" autocomplete="off">
       <select class="in" id="ex-f" aria-label="Show"><option value="all">All</option><option value="yours" ${UI.exF === "yours" ? "selected" : ""}>Added by coaches</option><option value="video" ${UI.exF === "video" ? "selected" : ""}>With a video</option><option value="novideo" ${UI.exF === "novideo" ? "selected" : ""}>Without a video</option><option value="changed" ${UI.exF === "changed" ? "selected" : ""}>Gym exercises you edited</option><option value="deleted" ${UI.exF === "deleted" ? "selected" : ""}>Deleted</option></select></div>
@@ -790,6 +790,13 @@ document.addEventListener("click", (ev) => {
     case "prog-new": { const np = newProgram(t.dataset.c); UI.day = 0; location.hash = "#program-" + np.id; break; }
     case "prog-dup": UI.confirm = "dup:" + t.dataset.id; route(); break;
     case "ex-new": newExerciseModal(); break;
+    case "ex-export": { // every exercise with where it came from and how many programs use it (for tidying the list)
+      const uses = {}; for (const p of db.programs) for (const d of p.days || []) for (const b of d.blocks || []) (uses[b.ex] = uses[b.ex] || new Set()).add(p.id);
+      const list = allEx(true).map((m) => ({ id: m.id, name: m.name, muscle: m.muscle || "", kind: m.kind || "", source: isBuiltIn(m.id) ? (db.custom[m.id] ? "gym (edited)" : "gym") : "added", deleted: !!m.deleted,
+        video: videoOf(m) || "", hasGuide: !!guideFor(m.id), fields: m.fields || null, programs: uses[m.id] ? uses[m.id].size : 0 }));
+      const blob = new Blob([JSON.stringify({ app: "powerplant-exercises", v: 1, at: new Date().toISOString(), count: list.length, exercises: list }, null, 1)], { type: "application/json" });
+      const url = URL.createObjectURL(blob), el = document.createElement("a"); el.href = url; el.download = `power-plant-exercises-${todayISO()}.json`; document.body.appendChild(el); el.click(); el.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
+      toast(`Downloaded ${list.length} exercises.`); break; }
     case "ex-open": openExercise(t.dataset.id); break;
     case "ex-create": { const v = readExForm(); if (!v) break;
       const clash = allEx(true).find((m) => m.name.toLowerCase() === v.name.toLowerCase());
