@@ -2,7 +2,7 @@
    Until accounts are live, data (and a sample program) live on this device. */
 (() => {
 "use strict";
-const APP_VERSION = "0.2.2";
+const APP_VERSION = "0.3.0";
 const APP_NAME = "Power Plant";
 
 /* ================= Exercise library ================= */
@@ -78,18 +78,134 @@ const LIB_ROWS = [
   ["row_erg", "Rowing Machine", "cardio", "Conditioning", 1, 0, 0, { track: "dt", dist: "short", defD: 2000, defS: 480 }],
   ["bike", "Stationary Bike", "cardio", "Conditioning", 1, 0, 0, { track: "dt", dist: "long", defD: 5, defS: 900 }],
   ["stairs", "Stair Climber", "cardio", "Conditioning", 1, 0, 0, { track: "time", better: "higher", defS: 900 }],
+  // Exercises from the gym's YouTube channel (youtube.com/@powerplantgym). Each has its video in GYM_VIDEOS.
+  // Legs
+  ["belt_squat", "Belt Squat", "machine", "Legs", 3, 8, 12],
+  ["pin_squat", "High Pin Squat", "barbell", "Legs", 3, 3, 5],
+  ["tempo_squat", "Tempo Squat", "barbell", "Quads", 3, 5, 5],
+  ["goblet_1510", "1:5:10 Goblet Squat", "dumbbell", "Legs", 3, 5, 5],
+  ["goblet_pressout", "Goblet Squat with Press-Out", "dumbbell", "Legs", 3, 8, 10],
+  ["split_squat", "Split Squat", "dumbbell", "Legs", 3, 8, 12],
+  ["lunge_1half", "1½ Lunge", "dumbbell", "Legs", 3, 8, 10],
+  ["db_reverse_lunge", "Dumbbell Reverse Lunge", "dumbbell", "Legs", 3, 8, 12],
+  ["kb_reverse_lunge", "Kettlebell Reverse Lunge", "kettlebell", "Legs", 3, 8, 12],
+  ["dkb_reverse_lunge", "Double-Kettlebell Reverse Lunge", "kettlebell", "Legs", 3, 8, 10],
+  ["oh_lunge", "Overhead Walking Lunge", "other", "Legs", 3, 8, 10],
+  ["pistol_box", "Single-Leg Squat to Box", "bodyweight", "Legs", 3, 5, 8],
+  ["skier_squat", "Downhill Skier Squat", "bodyweight", "Quads", 3, 0, 0, { track: "time", better: "higher", defS: 30 }],
+  ["jump_squat", "Jump Squat", "bodyweight", "Legs", 3, 5, 8],
+  ["box_jump", "Box Jump", "bodyweight", "Legs", 3, 3, 5],
+  ["mb_broad_jump", "Med Ball Broad Jump", "other", "Legs", 3, 3, 5],
+  ["lateral_hops", "Lateral Hops Over Plate", "bodyweight", "Conditioning", 3, 0, 0, { track: "time", better: "higher", defS: 30 }],
+  // Hinges and posterior chain
+  ["strongman_dl", "Strongman Deadlift (13-inch)", "barbell", "Back", 3, 3, 5],
+  ["staggered_dl", "Staggered-Stance Deadlift", "dumbbell", "Hamstrings", 3, 8, 10],
+  ["rfe_sldl", "Rear-Foot-Elevated Single-Leg Deadlift", "dumbbell", "Hamstrings", 3, 8, 10],
+  ["glute_bridge", "Glute Bridge", "bodyweight", "Glutes", 3, 10, 15],
+  ["ghr", "Glute-Ham Raise", "machine", "Hamstrings", 3, 5, 8],
+  ["rower_ham_curl", "Rower Hamstring Curl", "bodyweight", "Hamstrings", 3, 8, 12],
+  ["fr_ham_curl", "Foam Roller Hamstring Curl", "bodyweight", "Hamstrings", 3, 8, 12],
+  ["band_pull_through", "Band Pull-Through", "band", "Glutes", 3, 12, 15],
+  ["pvc_gm", "PVC Good Morning", "other", "Hamstrings", 2, 10, 10],
+  ["kb_swing", "Kettlebell Swing", "kettlebell", "Glutes", 3, 10, 15],
+  ["kb_start_stop_swing", "Start-Stop Kettlebell Swing", "kettlebell", "Glutes", 3, 5, 10],
+  ["kb_hike_pass", "Kettlebell Hike Pass", "kettlebell", "Glutes", 2, 8, 10],
+  ["kb_pendulum", "Kettlebell Lateral Pendulum Swing", "kettlebell", "Glutes", 3, 10, 12],
+  // Olympic-style lifts
+  ["hang_clean", "Hang Clean", "barbell", "Legs", 3, 2, 3],
+  ["clean_high_pull", "Clean High Pull", "barbell", "Traps", 3, 3, 5],
+  ["sg_high_pull", "Snatch-Grip High Pull", "barbell", "Traps", 3, 3, 5],
+  ["tall_jerk", "Tall Power Jerk", "barbell", "Shoulders", 3, 3, 3],
+  ["bb_complex", "Barbell Complex", "barbell", "Conditioning", 3, 5, 6],
+  // Chest and triceps
+  ["deficit_pushup", "Deficit Push-up", "bodyweight", "Chest", 3, 8, 15],
+  ["cg_pushup", "Close-Grip Push-up", "bodyweight", "Triceps", 3, 8, 15],
+  ["db_fly", "Dumbbell Chest Fly", "dumbbell", "Chest", 3, 10, 12],
+  // Back
+  ["standing_cable_row", "Standing Cable Row", "cable", "Back", 3, 10, 12],
+  ["segmented_row", "Segmented Row", "barbell", "Back", 3, 6, 8],
+  ["band_row", "Seated Band Row", "band", "Back", 3, 12, 15],
+  ["band_pulldown", "Band Pull-down (Bench Prep)", "band", "Back", 2, 15, 20],
+  ["band_lat_pullin", "Band Lat Pull-in", "band", "Back", 2, 12, 15],
+  ["band_pullover", "Band Pullover / Lat Pushdown", "band", "Back", 3, 12, 15],
+  // Shoulders and upper back
+  ["sahk_db_press", "Half-Kneeling One-Arm Dumbbell Press", "dumbbell", "Shoulders", 3, 8, 10],
+  ["kb_bottom_up", "Kettlebell Bottoms-Up Press", "kettlebell", "Shoulders", 3, 5, 8],
+  ["kb_armbar", "Kettlebell Arm Bar", "kettlebell", "Shoulders", 2, 3, 5],
+  ["db_face_pull", "Dumbbell Face Pull", "dumbbell", "Rear delts", 3, 12, 15],
+  ["band_pull_apart", "Band Pull-Apart", "band", "Rear delts", 3, 15, 20],
+  ["band_rear_fly", "Banded Rear Delt Fly", "band", "Rear delts", 3, 12, 15],
+  ["band_underhand_pa", "Underhand Band Pull-Apart and Dislocate", "band", "Rear delts", 2, 10, 12],
+  ["band_yw", "Band Y's and W's", "band", "Rear delts", 2, 10, 12],
+  ["yti", "Y-T-I Raise", "dumbbell", "Rear delts", 2, 8, 10],
+  ["band_ir_er", "Band Shoulder Internal/External Rotation", "band", "Shoulders", 2, 12, 15],
+  ["shoulder_9090_band", "Shoulder 90-90 (Band)", "band", "Shoulders", 2, 10, 12],
+  ["shoulder_9090_plate", "Shoulder 90-90 (Plate)", "other", "Shoulders", 2, 10, 12],
+  ["band_scap", "Band Scapular Retraction/Protraction", "band", "Back", 2, 12, 15],
+  // Arms
+  ["spider_curl", "Spider Curl", "dumbbell", "Biceps", 3, 10, 12],
+  // Core
+  ["fr_rollout", "Foam Roller Rollout", "bodyweight", "Core", 3, 6, 10],
+  ["bird_dog", "Floating Bird Dog", "bodyweight", "Core", 3, 6, 10],
+  ["dead_bug", "Dead Bug", "bodyweight", "Core", 3, 6, 10],
+  ["hollow_hold", "Hollow Hold", "bodyweight", "Core", 3, 0, 0, { track: "time", better: "higher", defS: 30 }],
+  ["reverse_plank", "Reverse Plank", "bodyweight", "Core", 3, 0, 0, { track: "time", better: "higher", defS: 30 }],
+  ["contra_plank", "Contralateral Plank", "bodyweight", "Core", 3, 0, 0, { track: "time", better: "higher", defS: 30 }],
+  ["lrc_plank", "Left-Right-Center Plank", "bodyweight", "Core", 2, 0, 0, { track: "time", better: "higher", defS: 90 }],
+  ["shoulder_tap", "Shoulder Tap Plank", "bodyweight", "Core", 3, 10, 20],
+  ["high_low_plank", "High-Low Plank", "bodyweight", "Core", 3, 6, 10],
+  ["russian_twist", "Russian Twist", "bodyweight", "Core", 3, 10, 20],
+  ["mb_toe_touch", "Med Ball Toe Touch", "other", "Core", 3, 10, 15],
+  ["pallof_rot", "Standing Pallof Press with Rotation", "band", "Core", 3, 8, 10],
+  ["hk_pallof", "Half-Kneeling Pallof Press", "band", "Core", 3, 8, 10],
+  ["kb_pull_through", "Kettlebell Plank Pull-Through", "kettlebell", "Core", 3, 6, 10],
+  // Carries and strongman
+  ["bb_suitcase", "Barbell Suitcase Carry", "barbell", "Grip", 3, 0, 0, { track: "wd", dist: "short", defD: 40 }],
+  ["kb_suitcase", "Kettlebell Suitcase Carry", "kettlebell", "Core", 3, 0, 0, { track: "wd", dist: "short", defD: 40 }],
+  ["yoke_carry", "Yoke Carry", "strongman", "Legs", 3, 0, 0, { track: "wd", dist: "short", defD: 20 }],
+  ["keg_carry", "Keg Carry", "strongman", "Core", 3, 0, 0, { track: "wd", dist: "short", defD: 40 }],
+  ["hbt_march", "HBT March", "barbell", "Core", 3, 0, 0, { track: "time", better: "higher", defS: 20 }],
+  ["keg_load", "Keg Load", "strongman", "Back", 3, 3, 5],
+  ["keg_clean_press", "Keg Clean and Press", "strongman", "Shoulders", 3, 3, 5],
+  ["circus_db", "Circus Dumbbell Press", "strongman", "Shoulders", 3, 3, 6],
+  ["basket_dl", "Basket Deadlift", "strongman", "Back", 3, 3, 5],
+  // Mobility, warm-ups and stretches
+  ["wrist_mob", "Wrist Mobility", "bodyweight", "Other", 1, 0, 0, { track: "time", better: "higher", defS: 90 }],
+  ["cat_cow", "Cat/Cow", "bodyweight", "Lower back", 2, 8, 10],
+  ["cow_grazer", "Cow Grazer", "bodyweight", "Other", 2, 6, 8],
+  ["leg_swings", "Leg Swings", "bodyweight", "Other", 2, 10, 10],
+  ["hip_drop", "Hip Drop with Resisted Hold", "bodyweight", "Glutes", 2, 5, 5],
+  ["hip_9090", "90-90 Hip Mobility", "bodyweight", "Glutes", 2, 6, 8],
+  ["hip_9090_popup", "90-90 Hip Mobility with Pop-up", "bodyweight", "Glutes", 2, 5, 6],
+  ["seated_hip_ir", "Seated Hip Internal Rotation", "bodyweight", "Glutes", 2, 8, 10],
+  ["couch_stretch", "Couch Stretch", "bodyweight", "Quads", 2, 0, 0, { track: "time", better: "higher", defS: 60 }],
+  ["couch_pigeon", "Couch and Pigeon Stretch on Bench", "bodyweight", "Glutes", 2, 0, 0, { track: "time", better: "higher", defS: 60 }],
+  ["goblet_ham_stretch", "Goblet Squat to Hamstring Stretch", "dumbbell", "Hamstrings", 2, 6, 8],
+  ["band_ham_stretch", "Lying Band Hamstring Stretch", "band", "Hamstrings", 2, 0, 0, { track: "time", better: "higher", defS: 30 }],
+  ["seated_ham_stretch", "Seated Hamstring Stretch", "bodyweight", "Hamstrings", 2, 0, 0, { track: "time", better: "higher", defS: 30 }],
+  ["band_lat_stretch", "Band Lat Stretch", "band", "Back", 2, 0, 0, { track: "time", better: "higher", defS: 30 }],
+  ["child_side", "Child's Pose with Side Reach", "bodyweight", "Back", 2, 0, 0, { track: "time", better: "higher", defS: 30 }],
+  ["child_rot", "Child's Pose with Torso Rotation", "bodyweight", "Back", 2, 6, 8],
+  ["sphinx", "Sphinx with Side Looks and Protraction", "bodyweight", "Back", 2, 6, 8],
+  ["tspine_atw", "T-Spine Around the World", "other", "Back", 2, 5, 5],
+  ["oh_reach", "Standing Overhead Reach with Lift-off", "bodyweight", "Shoulders", 2, 8, 10],
+  ["wall_slide_band", "Scapular Wall Slide with Band", "band", "Shoulders", 2, 10, 12],
+  ["wall_slide_fr", "Scapular Wall Slide with Foam Roller", "other", "Shoulders", 2, 10, 12],
+  ["prone_dowel_press", "Prone Dowel Press Behind the Neck", "other", "Shoulders", 2, 8, 10],
+  ["band_dislocate_prone", "Prone Band Dislocate", "band", "Shoulders", 2, 8, 10],
 ];
-const KINDS = ["barbell", "dumbbell", "machine", "cable", "bodyweight", "cardio"];
+const KINDS = ["barbell", "dumbbell", "kettlebell", "machine", "cable", "bodyweight", "band", "strongman", "other", "cardio"];
+const isBW = (k) => k === "bodyweight" || k === "band"; // logged as reps, with optional added weight
 const TRACKS = { wr: "Weight × reps", time: "Time", dt: "Distance + time", wd: "Weight + distance" };
 const MUSCLES = ["Chest", "Back", "Shoulders", "Rear delts", "Traps", "Legs", "Quads", "Hamstrings", "Glutes", "Calves", "Lower back", "Biceps", "Triceps", "Core", "Grip", "Conditioning", "Other"];
 const LIB = {};
 for (const [id, name, kind, muscle, sets, repsMin, repsMax, extra] of LIB_ROWS) LIB[id] = { id, name, kind, muscle, sets, repsMin, repsMax, track: "wr", ...(extra || {}) };
 
 const KIND_DEFAULTS = {
-  lb: { barbell: { w: 45, inc: 5 }, dumbbell: { w: 20, inc: 5 }, machine: { w: 50, inc: 10 }, cable: { w: 30, inc: 5 }, bodyweight: { w: 0, inc: 5 }, cardio: { w: 0, inc: 0 } },
-  kg: { barbell: { w: 20, inc: 2.5 }, dumbbell: { w: 8, inc: 2 }, machine: { w: 25, inc: 5 }, cable: { w: 15, inc: 2.5 }, bodyweight: { w: 0, inc: 2.5 }, cardio: { w: 0, inc: 0 } },
+  lb: { barbell: { w: 45, inc: 5 }, dumbbell: { w: 20, inc: 5 }, kettlebell: { w: 35, inc: 5 }, machine: { w: 50, inc: 10 }, cable: { w: 30, inc: 5 }, bodyweight: { w: 0, inc: 5 }, band: { w: 0, inc: 0 }, strongman: { w: 100, inc: 10 }, other: { w: 10, inc: 5 }, cardio: { w: 0, inc: 0 } },
+  kg: { barbell: { w: 20, inc: 2.5 }, dumbbell: { w: 8, inc: 2 }, kettlebell: { w: 16, inc: 4 }, machine: { w: 25, inc: 5 }, cable: { w: 15, inc: 2.5 }, bodyweight: { w: 0, inc: 2.5 }, band: { w: 0, inc: 0 }, strongman: { w: 45, inc: 5 }, other: { w: 5, inc: 2.5 }, cardio: { w: 0, inc: 0 } },
 };
-const LOWER_BARBELL = new Set(["squat", "front_squat", "deadlift", "trap_dl", "rdl", "hip_thrust"]);
+const LOWER_BARBELL = new Set(["squat", "front_squat", "deadlift", "trap_dl", "rdl", "hip_thrust", "strongman_dl", "pin_squat", "tempo_squat"]);
 const PLATES = {
   lb: [[45, "--plate-blue", 30], [35, "--plate-yellow", 27], [25, "--plate-green", 24], [10, "--plate-white", 18], [5, "--plate-black", 15], [2.5, "--plate-black", 12]],
   kg: [[25, "--plate-red", 30], [20, "--plate-blue", 30], [15, "--plate-yellow", 27], [10, "--plate-green", 24], [5, "--plate-white", 18], [2.5, "--plate-black", 14], [1.25, "--plate-black", 11]],
@@ -200,7 +316,7 @@ function schemeLabel(e) {
 function weightLabel(e, w) {
   const u = S.state.units;
   if (e.track !== "wr" && e.track !== "wd") return "";
-  if (e.kind === "bodyweight") return w > 0 ? `BW +${fmt(w)} ${u}` : "Bodyweight";
+  if (isBW(e.kind)) return w > 0 ? `${e.kind === "band" ? "Band" : "BW"} +${fmt(w)} ${u}` : e.kind === "band" ? "Band" : "Bodyweight";
   if (e.kind === "dumbbell") return `${fmt(w)} ${u} each`;
   return `${fmt(w)} ${u}`;
 }
@@ -242,10 +358,10 @@ function setText(e, x) {
   if (e.track === "time") return mmss(x.s);
   if (e.track === "dt") return `${fmt(x.d)} ${distUnit(e)} · ${mmss(x.s)}`;
   if (e.track === "wd") return `${fmt(x.w)}×${fmt(x.d)}${distUnit(e)}`;
-  return e.kind === "bodyweight" && !(x.w > 0) ? `${x.r} reps` : `${fmt(x.w)}×${x.r}`;
+  return isBW(e.kind) && !(x.w > 0) ? `${x.r} reps` : `${fmt(x.w)}×${x.r}`;
 }
 function bestOf(e, sets) { // a single comparable score per session, higher is better
-  if (e.track === "wr") return Math.max(0, ...sets.filter((x) => x.t !== "w").map((x) => e1rm(x.w, x.r) || (e.kind === "bodyweight" ? x.r : 0)));
+  if (e.track === "wr") return Math.max(0, ...sets.filter((x) => x.t !== "w").map((x) => e1rm(x.w, x.r) || (isBW(e.kind) ? x.r : 0)));
   if (e.track === "time") return e.better === "lower" ? -Math.min(...sets.map((x) => x.s || 1e9)) : Math.max(0, ...sets.map((x) => x.s || 0));
   if (e.track === "dt") return Math.max(0, ...sets.map((x) => (x.s > 0 ? x.d / x.s : 0))); // speed
   if (e.track === "wd") return Math.max(0, ...sets.map((x) => (x.w || 0) * (x.d || 0)));
@@ -258,7 +374,7 @@ function records() {
     const e = wEx(raw); if (!e.sets.length) continue;
     const r = out[e.id] || (out[e.id] = { id: e.id, name: e.name, track: e.track, kind: e.kind, better: e.better, dist: (meta(e.id) || {}).dist });
     if (e.track === "wr") {
-      for (const x of e.sets) { if (x.t === "w") continue; const v = e1rm(x.w, x.r); if (v > (r.e1 || 0)) { r.e1 = v; r.e1Set = x; r.e1Date = w.date; } if ((x.w || 0) > (r.heavy?.w || 0) || ((x.w || 0) === (r.heavy?.w || 0) && x.r > (r.heavy?.r || 0))) { r.heavy = x; r.heavyDate = w.date; } if (e.kind === "bodyweight" && x.r > (r.reps || 0)) { r.reps = x.r; r.repsDate = w.date; } }
+      for (const x of e.sets) { if (x.t === "w") continue; const v = e1rm(x.w, x.r); if (v > (r.e1 || 0)) { r.e1 = v; r.e1Set = x; r.e1Date = w.date; } if ((x.w || 0) > (r.heavy?.w || 0) || ((x.w || 0) === (r.heavy?.w || 0) && x.r > (r.heavy?.r || 0))) { r.heavy = x; r.heavyDate = w.date; } if (isBW(e.kind) && x.r > (r.reps || 0)) { r.reps = x.r; r.repsDate = w.date; } }
     } else {
       const b = bestOf(e, e.sets);
       if (r.score == null || b > r.score) { r.score = b; r.bestSets = e.sets; r.bestDate = w.date; }
@@ -373,6 +489,111 @@ const GYM_VIDEOS = {
   ohp: "https://www.youtube.com/watch?v=pOZUEGzgMG0",          // Ideal Shoulder Position for Overhead Press
   pushdown: "https://www.youtube.com/watch?v=TfmunxJE_Xc",     // Band Pushdown Demo (band instead of cable)
   plank: "https://www.youtube.com/watch?v=NKVi5HXK1nc",        // Weighted Plank - Uses, Cues, Common Faults
+  // Gym exercises added from the channel (titles in the library above)
+  belt_squat: "https://www.youtube.com/watch?v=FPcwUFfzB-Y",
+  pin_squat: "https://www.youtube.com/watch?v=TFPuK9Zp-wQ",
+  tempo_squat: "https://www.youtube.com/watch?v=caov3DrPLeM",
+  goblet_1510: "https://www.youtube.com/watch?v=_jZPhjLugfc",
+  goblet_pressout: "https://www.youtube.com/watch?v=OZl4xalHADA",
+  split_squat: "https://www.youtube.com/watch?v=up94S43wjZI",
+  lunge_1half: "https://www.youtube.com/watch?v=7TUi39f2X0c",
+  db_reverse_lunge: "https://www.youtube.com/watch?v=nj_dEzkyJ2k",
+  kb_reverse_lunge: "https://www.youtube.com/watch?v=YZcE-kDg0Lc",
+  dkb_reverse_lunge: "https://www.youtube.com/watch?v=eRRerMaLGz0",
+  oh_lunge: "https://www.youtube.com/watch?v=MCp6xmyV0SM",
+  pistol_box: "https://www.youtube.com/watch?v=Tj8zaS-bM9A",
+  skier_squat: "https://www.youtube.com/watch?v=FW7AlCA4Lbc",
+  jump_squat: "https://www.youtube.com/watch?v=IrJfIbx96hk",
+  box_jump: "https://www.youtube.com/watch?v=iVEpyKVsIUI",
+  mb_broad_jump: "https://www.youtube.com/watch?v=cxzPl9k9w4g",
+  lateral_hops: "https://www.youtube.com/watch?v=cZlbJmNkEkw",
+  strongman_dl: "https://www.youtube.com/watch?v=-0Y6290mpck",
+  staggered_dl: "https://www.youtube.com/watch?v=9gkPQGYW40o",
+  rfe_sldl: "https://www.youtube.com/watch?v=Laxl1s3OLgk",
+  glute_bridge: "https://www.youtube.com/watch?v=acuxun8IKNs",
+  ghr: "https://www.youtube.com/watch?v=oVXivqOo91Y",
+  rower_ham_curl: "https://www.youtube.com/watch?v=Rg64SupNevo",
+  fr_ham_curl: "https://www.youtube.com/watch?v=FIT0I99asDU",
+  band_pull_through: "https://www.youtube.com/watch?v=UBYx7d0VcCg",
+  pvc_gm: "https://www.youtube.com/watch?v=W9iedxiZdgc",
+  kb_swing: "https://www.youtube.com/watch?v=Nz9TA-CIlGE",
+  kb_start_stop_swing: "https://www.youtube.com/watch?v=5ywqTZ1yBg4",
+  kb_hike_pass: "https://www.youtube.com/watch?v=J3R0CDNZH3A",
+  kb_pendulum: "https://www.youtube.com/watch?v=4zUZekixU3M",
+  hang_clean: "https://www.youtube.com/watch?v=wkwwyU9-QAE",
+  clean_high_pull: "https://www.youtube.com/watch?v=Ejn3dIjMQbc",
+  sg_high_pull: "https://www.youtube.com/watch?v=wcBgic1pQAY",
+  tall_jerk: "https://www.youtube.com/shorts/xTT0FvNoJ5A",
+  bb_complex: "https://www.youtube.com/watch?v=AbV8f_efW68",
+  deficit_pushup: "https://www.youtube.com/watch?v=vyqtgYXbxEQ",
+  cg_pushup: "https://www.youtube.com/watch?v=o_vzQvScixc",
+  db_fly: "https://www.youtube.com/watch?v=TiSRXc7bGaw",
+  standing_cable_row: "https://www.youtube.com/watch?v=nZ3kxUvkSPs",
+  segmented_row: "https://www.youtube.com/watch?v=cTLXDw3TNlw",
+  band_row: "https://www.youtube.com/watch?v=ePzsrh7Hu3Y",
+  band_pulldown: "https://www.youtube.com/watch?v=WjduWD8PjZE",
+  band_lat_pullin: "https://www.youtube.com/watch?v=Yzp8CWclH8g",
+  band_pullover: "https://www.youtube.com/watch?v=QijWclQqdbI",
+  sahk_db_press: "https://www.youtube.com/watch?v=tV8COmp3ot4",
+  kb_bottom_up: "https://www.youtube.com/watch?v=waNy5ptM7uk",
+  kb_armbar: "https://www.youtube.com/watch?v=j_k2SqBXUmQ",
+  db_face_pull: "https://www.youtube.com/watch?v=Rwe6bU-q2Wc",
+  band_pull_apart: "https://www.youtube.com/watch?v=xEX2bbavlao",
+  band_rear_fly: "https://www.youtube.com/watch?v=pVrcFq0OctM",
+  band_underhand_pa: "https://www.youtube.com/watch?v=jD0JyenRWNA",
+  band_yw: "https://www.youtube.com/watch?v=hIn9B-jGSXk",
+  yti: "https://www.youtube.com/watch?v=ir4IL4MaSCY",
+  band_ir_er: "https://www.youtube.com/watch?v=oQlUtyc5Hw4",
+  shoulder_9090_band: "https://www.youtube.com/watch?v=8Nvnfe5XSOE",
+  shoulder_9090_plate: "https://www.youtube.com/watch?v=Gv6IS7ipOW8",
+  band_scap: "https://www.youtube.com/watch?v=o-QgZXf6rPg",
+  spider_curl: "https://www.youtube.com/watch?v=AwO8N8ErQEs",
+  fr_rollout: "https://www.youtube.com/watch?v=YIrYVZLNrdQ",
+  bird_dog: "https://www.youtube.com/watch?v=GEMoOW5oeCY",
+  dead_bug: "https://www.youtube.com/watch?v=dOtpt_trzeg",
+  hollow_hold: "https://www.youtube.com/watch?v=kF0h0Z_q0dQ",
+  reverse_plank: "https://www.youtube.com/watch?v=PunNyDaM7AY",
+  contra_plank: "https://www.youtube.com/watch?v=DRCmUXe6fys",
+  lrc_plank: "https://www.youtube.com/watch?v=HQzUheWJfBg",
+  shoulder_tap: "https://www.youtube.com/watch?v=PqAuwmA1woc",
+  high_low_plank: "https://www.youtube.com/watch?v=Wf1wKRPjjO0",
+  russian_twist: "https://www.youtube.com/watch?v=tl-_T-rOGFQ",
+  mb_toe_touch: "https://www.youtube.com/watch?v=XRHPFVT0NfM",
+  pallof_rot: "https://www.youtube.com/watch?v=xeW0k41MENE",
+  hk_pallof: "https://www.youtube.com/watch?v=CRHHSmoakC8",
+  kb_pull_through: "https://www.youtube.com/watch?v=OeGLIu72TrE",
+  bb_suitcase: "https://www.youtube.com/watch?v=RXhdsL-AMw8",
+  kb_suitcase: "https://www.youtube.com/watch?v=UzjGxukrI5k",
+  yoke_carry: "https://www.youtube.com/watch?v=JLR5P5ykWAg",
+  keg_carry: "https://www.youtube.com/watch?v=E8I-UEJJuxI",
+  hbt_march: "https://www.youtube.com/shorts/MV2BU-HZ6L8",
+  keg_load: "https://www.youtube.com/watch?v=aTbGyyAAfmM",
+  keg_clean_press: "https://www.youtube.com/watch?v=7C8DnqqtgxY",
+  circus_db: "https://www.youtube.com/watch?v=B39XYvkwfrI",
+  basket_dl: "https://www.youtube.com/shorts/KZBJ37vM9So",
+  wrist_mob: "https://www.youtube.com/watch?v=ybxLEGHeOM0",
+  cat_cow: "https://www.youtube.com/watch?v=kebEsrv3QcU",
+  cow_grazer: "https://www.youtube.com/watch?v=RntO2LcPXdc",
+  leg_swings: "https://www.youtube.com/watch?v=oGzEe5qfaWU",
+  hip_drop: "https://www.youtube.com/watch?v=LwT9Bky34M8",
+  hip_9090: "https://www.youtube.com/watch?v=g-TI6l7KA4E",
+  hip_9090_popup: "https://www.youtube.com/watch?v=YTrV2Gts_wM",
+  seated_hip_ir: "https://www.youtube.com/watch?v=l2xikhsisSw",
+  couch_stretch: "https://www.youtube.com/watch?v=QlfwfsDlZ_8",
+  couch_pigeon: "https://www.youtube.com/watch?v=bCMKpfjPlJo",
+  goblet_ham_stretch: "https://www.youtube.com/watch?v=G1JxUCOCAXA",
+  band_ham_stretch: "https://www.youtube.com/watch?v=gg7Zr4i8Kkg",
+  seated_ham_stretch: "https://www.youtube.com/watch?v=dOki9IXNJv4",
+  band_lat_stretch: "https://www.youtube.com/watch?v=a7lSe1Ff6eU",
+  child_side: "https://www.youtube.com/watch?v=YTAwpiX2Dsg",
+  child_rot: "https://www.youtube.com/watch?v=3YTe3clu8ts",
+  sphinx: "https://www.youtube.com/watch?v=Ae9amUUaDRg",
+  tspine_atw: "https://www.youtube.com/watch?v=4XP2sCGlu9w",
+  oh_reach: "https://www.youtube.com/watch?v=gEcb0h5-AC4",
+  wall_slide_band: "https://www.youtube.com/watch?v=rTwQ0VYwimU",
+  wall_slide_fr: "https://www.youtube.com/watch?v=-qKLZb0Y7IQ",
+  prone_dowel_press: "https://www.youtube.com/watch?v=jL69-sRuT88",
+  band_dislocate_prone: "https://www.youtube.com/watch?v=87K93G86xwc",
 };
 function ytId(url) {
   const m = String(url || "").match(/(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/))([A-Za-z0-9_-]{11})/);
@@ -544,7 +765,7 @@ function setRowHTML(ei, si, it, e, x, prev, workIdx) {
   const miss = x.done && e.track === "wr" && x.t !== "w" && x.r < e.repsMin;
   const inp = (f, val, attrs) => `<input data-f="${f}" data-e="${ei}" data-s="${si}" value="${esc(val)}" ${attrs}>`;
   let cells = "";
-  if (e.track === "wr") cells = (e.kind === "bodyweight" ? inp("w", x.w > 0 ? fmt(x.w) : "", `inputmode="decimal" placeholder="+0" aria-label="Added weight"`) : inp("w", fmt(x.w), `inputmode="decimal" aria-label="Weight"`)) + inp("r", x.r ?? "", `inputmode="numeric" aria-label="Reps"`);
+  if (e.track === "wr") cells = (isBW(e.kind) ? inp("w", x.w > 0 ? fmt(x.w) : "", `inputmode="decimal" placeholder="+0" aria-label="Added weight"`) : inp("w", fmt(x.w), `inputmode="decimal" aria-label="Weight"`)) + inp("r", x.r ?? "", `inputmode="numeric" aria-label="Reps"`);
   else if (e.track === "time") cells = inp("s", mmss(x.s), `inputmode="numeric" aria-label="Time, minutes:seconds"`);
   else if (e.track === "dt") cells = inp("d", fmt(x.d), `inputmode="decimal" aria-label="Distance in ${distUnit(e)}"`) + inp("s", mmss(x.s), `inputmode="numeric" aria-label="Time"`);
   else if (e.track === "wd") cells = inp("w", fmt(x.w), `inputmode="decimal" aria-label="Weight"`) + inp("d", fmt(x.d), `inputmode="decimal" aria-label="Distance in ${distUnit(e)}"`);
@@ -596,14 +817,14 @@ function renderWorkout() {
     let wi = 0, wu = 0, ni = 0;
     const rows = it.sets.map((x, si) => { const p = x.t === "w" ? prevWarm[wu++] : prevWork[ni++]; if (x.t === "n") wi++; return setRowHTML(ei, si, it, e, x, p, wi); }).join("");
     const cols = e.track === "time" ? 1 : 2;
-    const heads = e.track === "wr" ? [e.kind === "bodyweight" ? "+" + S.state.units : S.state.units, "Reps"] : e.track === "time" ? ["Time"] : e.track === "dt" ? [distUnit(e), "Time"] : [S.state.units, distUnit(e)];
+    const heads = e.track === "wr" ? [isBW(e.kind) ? "+" + S.state.units : S.state.units, "Reps"] : e.track === "time" ? ["Time"] : e.track === "dt" ? [distUnit(e), "Time"] : [S.state.units, distUnit(e)];
     const topW = Math.max(0, ...it.sets.filter((x) => x.t === "n").map((x) => x.w || 0));
     const confirmRemove = S.ui.confirm === "rm:" + ei;
     const noteOpen = S.ui.note === ei || it.note;
     return `${g && g.idx === 1 ? groupHeader(a.items, g) : ""}<section class="ex${g ? " grouped" : ""}">
       <div class="ex-head"><div><div class="kind">${g ? `<span class="glabel">${esc(g.letter)}${g.idx}</span> ` : ""}${esc(e.muscle)} · ${esc(e.kind)}</div><button class="ex-name-btn" data-act="info" data-id="${esc(it.ex)}" aria-label="How to do ${esc(e.name)}"><span class="ex-name">${esc(e.name)}</span><span class="info-btn" aria-hidden="true">i</span></button>
         ${it.rx ? `<div class="ex-scheme rx-line">Coach: ${esc(rxText(it.rx, !!g))}</div>${it.rx.note ? `<div class="rx-note">${esc(it.rx.note)}</div>` : ""}` : `<div class="ex-scheme">${esc(schemeLabel(e))}${e.track === "wr" ? " reps" : ""}${e.fails ? ` · <span style="color:var(--warn)">${e.fails} prior miss${e.fails > 1 ? "es" : ""}</span>` : ""}</div>`}</div>
-        ${e.track === "wr" && e.kind !== "bodyweight" ? `<span class="weight-btn num" style="border:0">${fmt(topW)}<small>${S.state.units}${e.kind === "dumbbell" ? " ea" : ""}</small></span>` : ""}</div>
+        ${e.track === "wr" && !isBW(e.kind) ? `<span class="weight-btn num" style="border:0">${fmt(topW)}<small>${S.state.units}${e.kind === "dumbbell" ? " ea" : ""}</small></span>` : ""}</div>
       <div class="setrows" style="--cols:${cols}">
         <div class="sethead"><span>Set</span><span>Last</span>${heads.map((h) => `<span style="text-align:center">${esc(h)}</span>`).join("")}<span>Done</span></div>
         ${rows}
@@ -687,7 +908,7 @@ function renderPlan() {
         const fields = !ed ? "" : `<div class="grid-fields">
           ${f("Sets", "sets", e.sets)}
           ${e.track === "wr" ? f("Min reps", "repsMin", e.repsMin) + f("Max reps", "repsMax", e.repsMax) : ""}
-          ${e.track === "wr" || e.track === "wd" ? f(`${e.kind === "bodyweight" ? "Added" : "Weight"} (${u}${e.kind === "dumbbell" ? " each" : ""})`, "weight", fmt(e.weight), 'inputmode="decimal"') : ""}
+          ${e.track === "wr" || e.track === "wd" ? f(`${isBW(e.kind) ? "Added" : "Weight"} (${u}${e.kind === "dumbbell" ? " each" : ""})`, "weight", fmt(e.weight), 'inputmode="decimal"') : ""}
           ${e.track === "wr" ? f(`Add after success (${u})`, "inc", fmt(e.inc), 'inputmode="decimal"') : ""}
         </div><span class="note">These settings apply to ${esc(e.name)} in every routine.</span>`;
         return `<div class="item"><div class="top">
@@ -732,6 +953,7 @@ function renderInfo(id) {
       <section><h3>Form cues</h3>${list("ul", g.c)}</section>
       <section><h3>Common mistakes</h3>${list("ul", g.x)}</section>
       <p class="note">General guidance, not medical advice. Stop if something hurts sharply, and get a coach or physical therapist to check your form if you’re unsure.</p>`
+    : builtIn && videoFor(id) ? `<div class="empty">There’s no written guide for this one yet. Follow the coach in the gym’s video above.</div>`
     : `<div class="empty">There’s no guide for this exercise yet. Custom exercises don’t come with one. You can keep your own cues in the exercise’s workout notes.</div>`;
   return `<div class="sheet-wrap" data-act="sheet-bg"><div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(e.name)} guide">
     <div class="row"><div class="grow"><div class="kind">${esc(e.muscle)} · ${esc(e.kind)}</div><h2>${esc(e.name)}</h2></div><button class="btn small ghost" data-act="info-close">${S.ui.picker ? "Back" : "Close"}</button></div>
@@ -786,7 +1008,7 @@ function sessionPoints(exId) {
   const pts = [];
   for (const w of S.workouts) for (const raw of w.exercises || []) {
     const e = wEx(raw); if (e.id !== exId || !e.sets.length) continue;
-    const v = e.track === "wr" ? (e.kind === "bodyweight" && !e.sets.some((x) => x.w > 0) ? Math.max(...e.sets.map((x) => x.r || 0)) : Math.max(0, ...e.sets.filter((x) => x.t !== "w").map((x) => e1rm(x.w, x.r))))
+    const v = e.track === "wr" ? (isBW(e.kind) && !e.sets.some((x) => x.w > 0) ? Math.max(...e.sets.map((x) => x.r || 0)) : Math.max(0, ...e.sets.filter((x) => x.t !== "w").map((x) => e1rm(x.w, x.r))))
       : e.track === "time" ? (e.better === "lower" ? Math.min(...e.sets.map((x) => x.s || 1e9)) : Math.max(...e.sets.map((x) => x.s || 0)))
       : e.track === "dt" ? Math.max(...e.sets.map((x) => x.d || 0)) : Math.max(...e.sets.map((x) => x.w || 0));
     if (v > 0 && v < 1e9) pts.push({ t: Date.parse(w.date), v });
@@ -823,7 +1045,7 @@ function renderHistory() {
   const opts = [...logged.entries()].map(([id, n]) => `<option value="${esc(id)}" ${id === S.ui.chartEx ? "selected" : ""}>${esc(n)}</option>`).join("");
   const ce = S.ui.chartEx ? (meta(S.ui.chartEx) ? getEx(S.ui.chartEx) : wEx({ ex: S.ui.chartEx })) : null;
   const pts = S.ui.chartEx ? sessionPoints(S.ui.chartEx) : [];
-  const chartLabel = !ce ? "" : ce.track === "wr" ? (ce.kind === "bodyweight" ? "Best set (reps)" : `Estimated 1-rep max (${u})`) : ce.track === "time" ? "Best time" : ce.track === "dt" ? `Distance (${distUnit(ce)})` : `Heaviest carry (${u})`;
+  const chartLabel = !ce ? "" : ce.track === "wr" ? (isBW(ce.kind) ? "Best set (reps)" : `Estimated 1-rep max (${u})`) : ce.track === "time" ? "Best time" : ce.track === "dt" ? `Distance (${distUnit(ce)})` : `Heaviest carry (${u})`;
   const ws = weeklySets(), wsMax = Math.max(10, ...Object.values(ws));
   const bars = Object.entries(ws).sort((a, b) => b[1] - a[1]).map(([mu, n]) => `<span>${esc(mu)}</span><span class="track"><span class="fill" style="display:block;width:${(n / wsMax) * 100}%"></span></span><b class="num">${n}</b>`).join("");
   const rec = Object.values(records()).sort((a, b) => a.name.localeCompare(b.name));
