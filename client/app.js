@@ -589,7 +589,9 @@ function rxListHTML(items, withInfo) {
 const dayKey = (w, d) => `${w}-${d}`;
 function programDone(pr) {
   const out = {};
-  for (const w of S.workouts) if (w.prog && pr && w.prog.id === pr.id) { const k = dayKey(w.prog.w, w.prog.d); if (!out[k] || out[k] < w.date) out[k] = w.date; }
+  for (const w of S.workouts) if (w.prog && pr && w.prog.id === pr.id) {
+    let d = w.prog.d; if (w.prog.did && pr.weeks[w.prog.w]) { const i = pr.weeks[w.prog.w].days.findIndex((x) => x.id === w.prog.did); if (i >= 0) d = i; else continue; }
+    const k = dayKey(w.prog.w, d); if (!out[k] || out[k] < w.date) out[k] = w.date; }
   return out;
 }
 // Next workout: for a dated program, today's or the next upcoming one (missed days are listed separately); otherwise the first not done.
@@ -693,7 +695,7 @@ function fillBackoffs(it) {
 }
 function startCoachDay(w, d) {
   const pr = program(); const day = pr && pr.weeks[w] && pr.weeks[w].days[d]; if (!day) return;
-  S.state.active = { routine: null, prog: { id: pr.id, w, d }, name: `Week ${w + 1} · ${day.name}`, coachNote: day.note || "", warmup: day.warmup || "", cooldown: day.cooldown || "", startedAt: new Date().toISOString(), note: "", restEndsAt: null, items: day.items.map(rxEntry) };
+  S.state.active = { routine: null, prog: { id: pr.id, w, d, did: day.id || null }, name: `Week ${w + 1} · ${day.name}`, coachNote: day.note || "", warmup: day.warmup || "", cooldown: day.cooldown || "", startedAt: new Date().toISOString(), note: "", restEndsAt: null, items: day.items.map(rxEntry) };
   S.ui.summary = null; saveState(); location.hash = "#workout"; render(); window.scrollTo(0, 0);
 }
 function missingMaxes(day) { return [...new Set(day.items.filter((it) => ((it.load && it.load.t === "pct") || (it.groups || []).some((g) => g.load && g.load.t === "pct")) && !maxFor(it.ex)).map((it) => it.ex))]; }
@@ -925,7 +927,7 @@ function renderProgram() {
   if (!pr) return `${header("From your coach", "Program")}<div class="empty">No program yet. When your coach assigns you one, it shows up here.</div>`;
   const done = programDone(pr), nd = nextDay(pr);
   const total = pr.weeks.reduce((n, w) => n + w.days.length, 0), finished = Object.keys(done).length;
-  const weeks = pr.weeks.map((wk, w) => `<section class="panel"><div class="row"><h2 class="grow">Week ${w + 1}</h2><span class="sub num">${wk.days.filter((_, d) => done[dayKey(w, d)]).length}/${wk.days.length} done</span></div>
+  const weeks = pr.weeks.map((wk, w) => !wk.days.length ? "" : `<section class="panel"><div class="row"><h2 class="grow">Week ${w + 1}</h2><span class="sub num">${wk.days.filter((_, d) => done[dayKey(w, d)]).length}/${wk.days.length} done</span></div>
     ${wk.note ? `<div class="coach-note">${PP.richText(wk.note)}</div>` : ""}
     ${wk.days.map((day, d) => {
       const k = dayKey(w, d), isNext = nd && nd.w === w && nd.d === d, open = S.ui.openDay === k;

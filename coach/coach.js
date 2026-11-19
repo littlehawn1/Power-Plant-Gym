@@ -396,7 +396,7 @@ function maxesCardHTML(c) {
 function scheduledFor(cid) {
   const out = [];
   for (const p of programsOf(cid)) {
-    if (p.schedule !== "weekly" || !p.startDate) continue;
+    if (!(p.schedule === "weekly" && p.startDate) && p.schedule !== "dated") continue;
     const cp = P.compile(p);
     cp.weeks.forEach((wk, w) => wk.days.forEach((day, d) => { if (day.date) out.push({ date: day.date, p, w, d, day }); }));
   }
@@ -413,7 +413,7 @@ function calendarHTML(c) {
     if (i >= 35 && !inMonth) break;
     const items = [];
     for (const s of sched.filter((x) => x.date === k)) {
-      const l = logs.find((x) => x.prog && x.prog.id === s.p.id && x.prog.w === s.w && x.prog.d === s.d);
+      const l = logs.find((x) => x.prog && x.prog.id === s.p.id && x.prog.w === s.w && (x.prog.did ? x.prog.did === s.day.id : x.prog.d === s.d));
       if (l) used.add(l.id);
       items.push({ title: `${s.day.name}`, note: s.day.note, status: l ? "done" : k < today ? "missed" : "up", log: l, rx: s.day.items, drag: l ? "" : `${s.p.id}|${s.w}|${s.day.id}`, moved: s.day.moved });
     }
@@ -433,7 +433,7 @@ function calendarHTML(c) {
 function renderClient(cid) {
   setNav("clients");
   const c = client(cid), logs = logsOf(cid), tab = UI.clientTab || "calendar";
-  const progs = programsOf(cid).map((p) => `<div class="pitem"><div class="grow"><b>${esc(p.name)}</b><div class="sub">${p.weeks} weeks · ${p.days.length} days/week · ${p.schedule === "weekly" ? "scheduled by day" : "any order"} · ${esc(programWeekNow(p) || "")}</div></div>
+  const progs = programsOf(cid).map((p) => `<div class="pitem"><div class="grow"><b>${esc(p.name)}</b><div class="sub">${p.weeks} weeks · ${p.days.length} days/week · ${p.schedule === "dated" ? "on picked dates" : p.schedule === "weekly" ? "scheduled by day" : "any order"} · ${esc(programWeekNow(p) || "")}</div></div>
       <a class="btn small primary" href="#program-${p.id}" style="text-decoration:none">Edit</a><button class="btn small" data-act="prog-dup" data-id="${p.id}">Copy…</button><button class="btn small ghost" data-act="prog-rm" data-id="${p.id}">Remove</button></div>
       ${UI.confirm === "rm:" + p.id ? `<div class="panel" style="background:var(--sunken)"><b>Remove “${esc(p.name)}” from ${esc(c.name)}?</b><div class="sub">Its workouts come off their calendar and app. Workouts they already logged stay.</div><div class="row"><button class="btn small danger" data-act="prog-rm-yes" data-id="${p.id}">Remove</button><button class="btn small ghost" data-act="cancel">Cancel</button></div></div>` : ""}`).join("");
   const dup = UI.confirm && UI.confirm.startsWith("dup:") ? db.programs.find((p) => p.id === UI.confirm.slice(4)) : null;
@@ -445,7 +445,7 @@ function renderClient(cid) {
           <select class="in" id="c-remote" data-c="${cid}" aria-label="Training"><option value="0">In person</option><option value="1" ${c.remote ? "selected" : ""}>Remote</option></select><span class="sub">${esc(c.email || "")}</span></div>`
       : `<div class="eyebrow">${c.remote ? "Remote" : "In person"} · Main coach: ${esc((db.coaches.find((x) => x.id === c.coachId) || {}).name || "–")}</div>`}<h1>${esc(c.name)}</h1></div></div>
     <div class="cols">
-      <section class="feed"><div class="row"><div class="seg" role="tablist"><button role="tab" data-act="ctab" data-t="calendar" aria-selected="${tab === "calendar"}">Calendar</button><button role="tab" data-act="ctab" data-t="feed" aria-selected="${tab === "feed"}">Recent workouts</button>${db.cloud ? `<button role="tab" data-act="ctab" data-t="messages" aria-selected="${tab === "messages"}">Messages${unreadOf(cid) ? `<span class="nbadge">${unreadOf(cid)}</span>` : ""}</button>` : ""}</div></div>
+      <section class="feed"><div class="row"><button class="btn small primary" data-act="sched-open" data-c="${cid}">+ Add workouts to calendar</button><div class="seg" role="tablist"><button role="tab" data-act="ctab" data-t="calendar" aria-selected="${tab === "calendar"}">Calendar</button><button role="tab" data-act="ctab" data-t="feed" aria-selected="${tab === "feed"}">Recent workouts</button>${db.cloud ? `<button role="tab" data-act="ctab" data-t="messages" aria-selected="${tab === "messages"}">Messages${unreadOf(cid) ? `<span class="nbadge">${unreadOf(cid)}</span>` : ""}</button>` : ""}</div></div>
         ${tab === "messages" && db.cloud ? conversationHTML(cid) : tab === "calendar" ? calendarHTML(c) : logs.map((l) => logCardHTML(l)).join("") || `<div class="empty">${db.cloud ? `No workouts logged yet. Every workout ${esc(c.name)} finishes in the app shows up here with their notes.` : `No workouts logged yet. Once accounts are live, every workout ${esc(c.name)} finishes shows up here with their notes. Until then, load the file they send from the app (Profile → Send my workouts to my coach).`}</div>`}</section>
       <aside style="display:flex;flex-direction:column;gap:18px">
         ${maxesCardHTML(c)}
@@ -656,8 +656,8 @@ function renderProgram(pid) {
     <section class="panel"><div class="ptop">
       <label class="f">Program name<input class="in name" id="p-name" value="${esc(p.name)}"></label>
       <label class="f">Weeks<input class="in" id="p-weeks" type="number" min="1" max="16" value="${p.weeks}"></label>
-      <label class="f">Schedule<select class="in" id="p-sched"><option value="weekly" ${p.schedule === "weekly" ? "selected" : ""}>On set days of the week</option><option value="flexible" ${p.schedule === "flexible" ? "selected" : ""}>In order, whenever they train</option></select></label>
-      <label class="f">Start date<input class="in" id="p-start" type="date" value="${esc(p.startDate || "")}" ${p.schedule === "weekly" ? "" : "disabled"}></label>
+      <label class="f">Schedule<select class="in" id="p-sched"><option value="weekly" ${p.schedule === "weekly" ? "selected" : ""}>On set days of the week</option><option value="dated" ${p.schedule === "dated" ? "selected" : ""}>On dates picked on the calendar</option><option value="flexible" ${p.schedule === "flexible" ? "selected" : ""}>In order, whenever they train</option></select></label>
+      <label class="f">Start date<input class="in" id="p-start" type="date" value="${esc(p.startDate || "")}" ${p.schedule === "dated" ? `disabled title="Set by the dates on the calendar"` : ""}></label>
       <span class="sub">${esc(programWeekNow(p) || "")}</span></div></section>
     <div class="days">${tabs}<button class="btn small" data-act="day-add">+ Add day</button></div>
     ${day ? `<section class="panel"><div class="dayset">
@@ -763,9 +763,65 @@ function moveSession(drag, date) {
   undoSnap = clone(pr); pr.moves = { ...(pr.moves || {}) };
   if (!date || date === usual) delete pr.moves[key]; else pr.moves[key] = date;
   if (!Object.keys(pr.moves).length) delete pr.moves;
+  if (pr.schedule === "dated") fixDatedStart(pr);
   save(); route();
-  toast(`Moved ${dd.name} (week ${w + 1}) to ${dateLabel(date || usual)}.`, { act: "undo", label: "Undo" });
+  toast(date || usual ? `Moved ${dd.name} (week ${w + 1}) to ${dateLabel(date || usual)}.` : `Took ${dd.name} (week ${w + 1}) off the calendar.`, { act: "undo", label: "Undo" });
 }
+function fixDatedStart(pr) { const ds = Object.values(pr.moves || {}).filter(Boolean).sort(); if (ds.length) pr.startDate = ds[0]; }
+
+/* ---- Add workouts to a client's calendar (pick a program, tick workouts, pick days) ---- */
+const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const hasWorkout = (p, w, day) => (day.blocks || []).some((b) => { const c = ((b.weeks || [])[w] || "").trim(); return c && !/^(skip|off|none|n\/a|-+|—)$/i.test(c); }) || day.warmup || day.cooldown;
+function schedOpen(cid) {
+  const own = programsOf(cid), tpls = db.programs.filter((p) => p.template);
+  const src = own[own.length - 1] || tpls[0]; if (!src) { toast("Make or import a program first."); return; }
+  const wds = [...new Set(src.days.map((d) => d.weekday).filter((x) => x != null))];
+  const n = new Date(); n.setDate(n.getDate() + ((8 - n.getDay()) % 7 || 7)); // next Monday
+  UI.sched = { cid, src: src.id, sel: new Set(), start: iso(n), wds: wds.length ? wds : [1, 3, 5] };
+  openModal(`<div id="sched">${schedHTML()}</div>`);
+}
+function schedPlan() { // the ticked workouts in program order, each on the next training day
+  const S = UI.sched, p = prog(S.src); if (!p) return [];
+  const list = []; for (let w = 0; w < p.weeks; w++) for (const day of p.days) if (S.sel.has(w + ":" + day.id)) list.push({ w, day });
+  if (!S.wds.length || !S.start) return list.map((x) => ({ ...x, date: null }));
+  const d = new Date(S.start + "T12:00:00"); let guard = 0;
+  return list.map((x) => { while (!S.wds.includes(d.getDay()) && guard++ < 1000) d.setDate(d.getDate() + 1); const out = { ...x, date: iso(d) }; d.setDate(d.getDate() + 1); return out; });
+}
+function schedHTML() {
+  const S = UI.sched, c = client(S.cid), p = prog(S.src), own = programsOf(S.cid), tpls = db.programs.filter((x) => x.template);
+  const opt = (x) => `<option value="${x.id}" ${x.id === S.src ? "selected" : ""}>${esc(x.name)}</option>`;
+  const weeks = []; for (let w = 0; w < p.weeks; w++) { const ds = p.days.filter((day) => hasWorkout(p, w, day)); if (ds.length) weeks.push({ w, ds }); }
+  const plan = schedPlan();
+  return `<div class="row"><h2 class="grow">Add workouts to ${esc(c.name)}’s calendar</h2><button class="btn small ghost" data-act="modal-close">Close</button></div>
+    <div class="form2">
+      <label class="f">From program<select class="in" id="sc-src">${own.length ? `<optgroup label="${esc(c.name)}’s programs">${own.map(opt).join("")}</optgroup>` : ""}${tpls.length ? `<optgroup label="Saved programs">${tpls.map(opt).join("")}</optgroup>` : ""}</select></label>
+      <label class="f">First workout on or after<input class="in" type="date" id="sc-start" value="${S.start}"></label>
+    </div>
+    <div class="fields"><span class="sub">Training days:</span>${[1, 2, 3, 4, 5, 6, 0].map((i) => `<label><input type="checkbox" class="sc-wd" value="${i}" ${S.wds.includes(i) ? "checked" : ""}> ${P.WEEKDAYS[i].slice(0, 3)}</label>`).join("")}</div>
+    <div class="row"><b class="grow">Workouts</b><button class="btn small ghost" data-act="sc-all">${S.sel.size ? "Clear" : "Select all"}</button></div>
+    <div class="sc-list">${weeks.map(({ w, ds }) => `<div class="sc-week"><label class="sc-wh"><input type="checkbox" data-act="sc-week" data-w="${w}" ${ds.every((day) => S.sel.has(w + ":" + day.id)) ? "checked" : ""}> <b>Week ${w + 1}</b></label>
+      ${ds.map((day) => { const k = w + ":" + day.id, pl = plan.find((x) => x.w === w && x.day.id === day.id); return `<label class="sc-day"><input type="checkbox" data-act="sc-day" data-k="${k}" ${S.sel.has(k) ? "checked" : ""}> ${esc(day.name || "Workout")}${pl && pl.date ? ` <span class="sub">→ ${esc(dateLabel(pl.date))}</span>` : ""}</label>`; }).join("")}</div>`).join("") || `<div class="empty">This program has no workouts yet.</div>`}</div>
+    <p class="sub">${p.clientId === S.cid ? `These dates replace the program’s usual schedule; workouts you don’t tick stay off the calendar.` : `A copy of “${esc(p.name)}” is made for ${esc(c.name)}, holding just these workouts. The saved program isn’t changed.`} After adding, drag any workout on the calendar to move it.</p>
+    <div class="row"><button class="btn primary" data-act="sc-add" ${plan.length && plan.every((x) => x.date) ? "" : "disabled"}>Add ${plan.length || ""} workout${plan.length === 1 ? "" : "s"} to the calendar</button></div>`;
+}
+function schedRedraw() { const el = $("#sched"); if (el) el.innerHTML = schedHTML(); }
+function schedApply() {
+  const S = UI.sched, src = prog(S.src), plan = schedPlan(); if (!src || !plan.length) return;
+  let t = src.clientId === S.cid ? src : db.programs.find((x) => x.clientId === S.cid && x.from === src.id && x.schedule === "dated");
+  if (!t) { t = clone(src); t.id = pid(); t.clientId = S.cid; t.template = false; t.from = src.id; t.coach = me().name; t.moves = {}; t.schedule = "dated"; db.programs.push(t); }
+  else {
+    undoSnap = clone(t);
+    if (t.schedule !== "dated") { // keep the dates its workouts already had, then switch to picked dates
+      const m = {}, cp = P.compile(t); cp.weeks.forEach((wk, w) => wk.days.forEach((day) => { if (day.date) m[w + ":" + day.id] = day.date; }));
+      t.moves = m; t.schedule = "dated";
+      if (t === src) for (const k of Object.keys(t.moves)) if (!S.sel.has(k)) delete t.moves[k]; // unticked come off
+    }
+  }
+  t.moves = t.moves || {}; for (const x of plan) t.moves[x.w + ":" + x.day.id] = x.date;
+  fixDatedStart(t); save(); closeModal(); UI.sched = null; UI.clientTab = "calendar"; UI.calMonth = plan[0].date.slice(0, 7); route();
+  toast(`Added ${plan.length} workout${plan.length === 1 ? "" : "s"} to ${client(S.cid).name}’s calendar.`);
+}
+
 // Drag and drop on the client calendar.
 let dragKey = null;
 document.addEventListener("dragstart", (ev) => { const el = ev.target.closest && ev.target.closest("[data-drag]"); if (!el) return; dragKey = el.dataset.drag; ev.dataTransfer.effectAllowed = "move"; try { ev.dataTransfer.setData("text/plain", dragKey); } catch {} el.classList.add("dragging"); });
@@ -789,6 +845,11 @@ document.addEventListener("click", (ev) => {
     case "reset-sample": db = seed(); save(); UI.confirm = null; renderTop(); route(); toast("Sample data reset."); break;
     case "prog-new": { const np = newProgram(t.dataset.c); UI.day = 0; location.hash = "#program-" + np.id; break; }
     case "prog-dup": UI.confirm = "dup:" + t.dataset.id; route(); break;
+    case "sched-open": schedOpen(t.dataset.c); break;
+    case "sc-day": { const k = t.dataset.k; if (t.checked) UI.sched.sel.add(k); else UI.sched.sel.delete(k); schedRedraw(); break; }
+    case "sc-week": { const w = +t.dataset.w, p2 = prog(UI.sched.src); for (const day of p2.days) if (hasWorkout(p2, w, day)) { const k = w + ":" + day.id; if (t.checked) UI.sched.sel.add(k); else UI.sched.sel.delete(k); } schedRedraw(); break; }
+    case "sc-all": { const p2 = prog(UI.sched.src); if (UI.sched.sel.size) UI.sched.sel.clear(); else for (let w = 0; w < p2.weeks; w++) for (const day of p2.days) if (hasWorkout(p2, w, day)) UI.sched.sel.add(w + ":" + day.id); schedRedraw(); break; }
+    case "sc-add": schedApply(); break;
     case "ex-new": newExerciseModal(); break;
     case "ex-export": { // every exercise with where it came from and how many programs use it (for tidying the list)
       const uses = {}; for (const p of db.programs) for (const d of p.days || []) for (const b of d.blocks || []) (uses[b.ex] = uses[b.ex] || new Set()).add(p.id);
@@ -835,8 +896,9 @@ document.addEventListener("click", (ev) => {
       openModal(`<div class="row"><h2 class="grow">Move ${esc(dd.name)} · week ${+w + 1}</h2><button class="btn small ghost" data-act="modal-close">Close</button></div>
         <p class="sub">Only this week’s ${esc(dd.name)} moves. The client sees it on the new date in their app. You can also drag workouts on the calendar.</p>
         <label class="f">New date<input class="in" type="date" id="mv-date" value="${cur}" data-drag="${esc(t.dataset.drag)}"></label>
-        <div class="row"><button class="btn primary" data-act="mv-save">Move</button>${P.movedDate(pr, +w, dd) ? `<button class="btn" data-act="mv-reset">Put back on ${esc(dateLabel(P.dayDate(pr, +w, dd)))}</button>` : ""}</div>`);
+        <div class="row"><button class="btn primary" data-act="mv-save">Move</button>${pr.schedule === "dated" ? `<button class="btn" data-act="mv-off">Take it off the calendar</button>` : ""}${P.movedDate(pr, +w, dd) && P.dayDate(pr, +w, dd) ? `<button class="btn" data-act="mv-reset">Put back on ${esc(dateLabel(P.dayDate(pr, +w, dd)))}</button>` : ""}</div>`);
       break; }
+    case "mv-off": { const inp = $("#mv-date"); moveSession(inp.dataset.drag, null); closeModal(); break; }
     case "mv-save": case "mv-reset": { const inp = $("#mv-date"); moveSession(inp.dataset.drag, a === "mv-reset" ? null : inp.value); closeModal(); break; }
     case "dup-yes": {
       const src = prog(t.dataset.id), np = clone(src), to = $("#dup-to").value; np.id = pid(); np.coach = me().name; delete np.moves;
@@ -920,6 +982,9 @@ document.addEventListener("input", (ev) => {
 document.addEventListener("change", (ev) => {
   const t = ev.target, p = cur() ? prog(cur()) : null;
   if (t.id === "me") { if (db.cloud) return; db.me = t.value; save(); route(); return; }
+  if (t.id === "sc-src" && UI.sched) { UI.sched.src = t.value; UI.sched.sel = new Set(); const p2 = prog(t.value), wds = [...new Set(p2.days.map((d) => d.weekday).filter((x) => x != null))]; if (wds.length) UI.sched.wds = wds; schedRedraw(); return; }
+  if (t.id === "sc-start" && UI.sched) { UI.sched.start = t.value; schedRedraw(); return; }
+  if (t.classList && t.classList.contains("sc-wd") && UI.sched) { UI.sched.wds = [...document.querySelectorAll(".sc-wd:checked")].map((x) => +x.value); schedRedraw(); return; }
   if (t.id === "ex-f") { UI.exF = t.value; $("#ex-list").innerHTML = exListHTML(); return; }
   if (["wu-reps", "wu-at", "wu-heavy"].includes(t.id)) {
     db.warmupDefault = P.warmupDefaultOf({ reps: $("#wu-reps").value, heavyAt: +$("#wu-at").value, heavyReps: $("#wu-heavy").value });

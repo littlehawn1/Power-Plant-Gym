@@ -141,7 +141,7 @@
   // A coach can move one week's session to another date (dragged on the calendar). Kept as { "<week>:<day id>": "YYYY-MM-DD" }.
   const moveKey = (w, day) => `${w}:${day.id}`;
   function movedDate(program, w, day) {
-    const m = program && program.moves; if (!m || program.schedule !== "weekly") return null;
+    const m = program && program.moves; if (!m || (program.schedule !== "weekly" && program.schedule !== "dated")) return null;
     const v = m[moveKey(w, day)]; return typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null;
   }
   // Turns a coach program (v2) into the week-by-week list the client app runs.
@@ -150,7 +150,7 @@
     const weeks = [];
     for (let w = 0; w < program.weeks; w++) {
       const days = program.days.map((day) => ({
-        id: day.id, name: day.name, weekday: day.weekday, date: movedDate(program, w, day) || dayDate(program, w, day), moved: !!movedDate(program, w, day), note: day.note || "", warmup: day.warmup || "", cooldown: day.cooldown || "",
+        id: day.id, name: day.name, weekday: day.weekday, date: movedDate(program, w, day) || dayDate(program, w, day), moved: program.schedule === "weekly" && !!movedDate(program, w, day), note: day.note || "", warmup: day.warmup || "", cooldown: day.cooldown || "",
         items: day.blocks.map((b) => {
           const cell = (b.weeks || [])[w] || ""; if (!cell.trim() || /^(skip|off|none|n\/a|-+|—)$/i.test(cell.trim())) return null;
           const rx = parsePrescription(cell);
@@ -158,7 +158,7 @@
           // Cells that aren't all shorthand are shown word for word; whatever could be read still sets up the logging rows.
           return { ex: b.ex, warmup: b.warmup || "", text: rx.errors.length || rx.loose ? cell.trim() : "", groups: rx.groups, tempo: rx.tempo, pause: rx.pause, rest: b.rest || 0, note: [b.note, wn].filter(Boolean).join(" "), group: b.group || null, video: b.video || "", fields: b.fields || null, format: b.format || null, warmupSets: !!b.warmupSets, sets: rx.groups.reduce((n, g) => n + g.sets, 0) };
         }).filter(Boolean),
-      })).filter((d) => d.items.length || d.warmup || d.cooldown);
+      })).filter((d) => (d.items.length || d.warmup || d.cooldown) && (program.schedule !== "dated" || d.date)); // a "dated" program only runs the workouts put on the calendar
       weeks.push({ note: (program.weekNotes || [])[w] || "", days });
     }
     return { warmupDefault: program.warmupDefault || null, id: program.id, name: program.name, coach: program.coach, schedule: program.schedule, startDate: program.startDate, sample: !!program.sample, maxes: program.maxes || null, weeks };

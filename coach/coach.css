@@ -197,3 +197,10 @@ table.maxt { width: 100%; border-collapse: collapse; font-size: 14px; }
 .exrow .grow { min-width: 0; overflow-wrap: anywhere; }
 .tag { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--sunken); white-space: nowrap; }
 .tag.vid { color: #f07521; }
+
+/* Add workouts to calendar */
+.sc-list { max-height: 46vh; overflow: auto; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+.sc-week { padding: 6px 0; border-bottom: 1px solid var(--line); }
+.sc-week:last-child { border-bottom: 0; }
+.sc-wh, .sc-day { display: flex; gap: 8px; align-items: center; padding: 3px 0; }
+.sc-day { padding-left: 22px; }
