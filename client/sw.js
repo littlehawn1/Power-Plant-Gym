@@ -1,6 +1,6 @@
 /* Power Plant service worker: offline app shell + update-on-request.
    Bump VERSION on every release; the new version activates on its own and the app reloads into it when no workout is in progress. */
-const VERSION = "0.8.1";
+const VERSION = "0.8.2";
 const SHELL = `pp-shell-${VERSION}`;
 const RUNTIME = "pp-runtime";
 const ASSETS = ["./", "index.html", "styles.css", "app.js", "exercises.js", "videos.js", "program.js", "sample.js", "supabase.js", "cloud.js", "messages.js", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png", "icons/maskable-512.png"];

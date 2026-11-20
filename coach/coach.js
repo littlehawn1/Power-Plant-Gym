@@ -632,12 +632,17 @@ function previewHTML(p, day) {
   }
   return preview;
 }
+// The weekday a day actually lands on: its own, or (with no weekday set) the one the start date gives it.
+function autoWd(p, d) {
+  if (d.weekday != null) return d.weekday;
+  const iso = P.dayDate(p, 0, d); return iso ? new Date(iso + "T12:00:00").getDay() : null;
+}
 function renderProgram(pid) {
   setNav("clients");
   const p = prog(pid), c = client(p.clientId) || null;
   if (UI.day >= p.days.length) UI.day = 0;
   const day = p.days[UI.day];
-  const tabs = p.days.map((d, i) => `<button class="dtab" data-act="day" data-i="${i}" aria-pressed="${i === UI.day}">${p.schedule === "weekly" && d.weekday != null ? `<small>${P.WEEKDAYS[d.weekday].slice(0, 3)}</small>` : `<small>Day ${i + 1}</small>`}${esc(d.name)}</button>`).join("");
+  const tabs = p.days.map((d, i) => `<button class="dtab" data-act="day" data-i="${i}" aria-pressed="${i === UI.day}">${p.schedule === "weekly" && autoWd(p, d) != null ? `<small>${P.WEEKDAYS[autoWd(p, d)].slice(0, 3)}</small>` : `<small>Day ${i + 1}</small>`}${esc(d.name)}</button>`).join("");
   const labels = day ? groupLabels(day.blocks) : [];
   const head = `<tr><th class="exh">Exercise</th>${Array.from({ length: p.weeks }, (_, w) => `<th>Week ${w + 1}<span class="sub">${weekRange(p, w)}</span>${w > 0 ? `<button class="btn small ghost" data-act="copy-col" data-w="${w}" title="Copy week ${w} into week ${w + 1}">Copy week ${w} →</button>` : ""}</th>`).join("")}</tr>`;
   const rows = day ? day.blocks.map((b, bi) => {
@@ -662,7 +667,7 @@ function renderProgram(pid) {
     <div class="days">${tabs}<button class="btn small" data-act="day-add">+ Add day</button></div>
     ${day ? `<section class="panel"><div class="dayset">
         <label class="f">Day name<input class="in" id="d-name" value="${esc(day.name)}"></label>
-        <label class="f">Day of week<select class="in" id="d-wd" ${p.schedule === "weekly" ? "" : "disabled"}><option value="">–</option>${P.WEEKDAYS.map((n, i) => `<option value="${i}" ${day.weekday === i ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+        <label class="f">Day of week<select class="in" id="d-wd" ${p.schedule === "weekly" ? "" : "disabled"}><option value="">${p.schedule === "weekly" && day.weekday == null && autoWd(p, day) != null ? `Auto: ${P.WEEKDAYS[autoWd(p, day)]}` : "–"}</option>${P.WEEKDAYS.map((n, i) => `<option value="${i}" ${day.weekday === i ? "selected" : ""}>${n}</option>`).join("")}</select></label>
         <span class="row" style="justify-content:flex-end"><button class="btn small" data-act="day-copy" ${db.programs.length > 1 ? "" : "disabled"}>Copy day to…</button>${UI.confirm === "day-rm" ? `<button class="btn small danger" data-act="day-rm-yes">Delete day</button><button class="btn small ghost" data-act="cancel">Keep</button>` : `<button class="btn small ghost danger" data-act="day-rm">Delete day</button>`}</span>
       </div>
       <div class="form3">

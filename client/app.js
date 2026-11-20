@@ -2,7 +2,7 @@
    Data lives on the phone and syncs to the client's account in the gym's Supabase project (see "Account + sync"). */
 (() => {
 "use strict";
-const APP_VERSION = "0.8.1";
+const APP_VERSION = "0.8.2";
 const PP = window.PPProgram;
 const APP_NAME = "Power Plant";
 
