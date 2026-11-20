@@ -131,10 +131,21 @@
     return "";
   }
   const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  // Days without a day of the week (common in imported programs) still land on the calendar: they follow each
+  // other from the start date in their order, so Day 1 is on the start date, Day 2 the next day, and so on,
+  // skipping days of the week other days already have.
+  function autoOffset(program, day) {
+    const start = new Date(program.startDate + "T12:00:00").getDay(), days = program.days || [];
+    const taken = new Set(days.filter((d) => d.weekday != null).map((d) => (d.weekday - start + 7) % 7));
+    const open = [0, 1, 2, 3, 4, 5, 6].filter((o) => !taken.has(o)); if (!open.length) open.push(0, 1, 2, 3, 4, 5, 6);
+    const i = days.filter((d) => d.weekday == null).findIndex((d) => d === day || (d.id && d.id === day.id));
+    return i < 0 ? open[0] : open[i % open.length];
+  }
   function dayDate(program, w, day) {
-    if (program.schedule !== "weekly" || !program.startDate || day.weekday == null) return null;
+    if (program.schedule !== "weekly" || !program.startDate) return null;
     const start = new Date(program.startDate + "T12:00:00");
-    const toWeekday = (day.weekday - start.getDay() + 7) % 7;
+    if (isNaN(start)) return null;
+    const toWeekday = day.weekday == null ? autoOffset(program, day) : (day.weekday - start.getDay() + 7) % 7;
     const d = new Date(start.getTime() + (w * 7 + toWeekday) * 864e5);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }
