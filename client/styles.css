@@ -334,3 +334,7 @@ details.past summary { cursor: pointer; font-weight: 600; }
 .maxes .mv { text-align: right; line-height: 1.1; }
 .barlist { display: grid; grid-template-columns: minmax(0, 1fr) 76px 32px; gap: 6px; align-items: center; }
 .barlist .num { text-align: right; }
+
+/* Circuits: each row names its exercise */
+.gcard .prev { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.gcard .prev .rn { font-size: 12px; font-weight: 600; color: var(--text, inherit); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

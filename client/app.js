@@ -2,7 +2,7 @@
    Data lives on the phone and syncs to the client's account in the gym's Supabase project (see "Account + sync"). */
 (() => {
 "use strict";
-const APP_VERSION = "0.8.2";
+const APP_VERSION = "0.8.3";
 const PP = window.PPProgram;
 const APP_NAME = "Power Plant";
 
@@ -666,7 +666,7 @@ function rxEntry(it) {
       const x = { t: g.amrap ? "f" : "n", done: false };
       if (g.load && g.load.t === "top") x.top = g.load.v;
       if (fields.includes("w")) x.w = g.build ? (lastTopWeight(it.ex) || "") : groupWeight(it.ex, g.load);
-      if (fields.includes("r")) x.r = g.reps || (g.amrap ? "" : g.repsMax || e.repsMax);
+      if (fields.includes("r")) { if (g.reps && g.repsMax) { x.r = ""; x.rr = `${g.reps}–${g.repsMax}`; } else x.r = g.reps || (g.amrap ? "" : g.repsMax || e.repsMax); }
       if (fields.includes("s")) x.s = g.time || 0;
       if (fields.includes("d")) x.d = g.dist ?? 0;
       if (fields.includes("h")) x.h = 0;
@@ -694,9 +694,23 @@ function fillBackoffs(it) {
   it.sets.forEach((x, j) => { if (!x.top || x.done || x.own) return; const w = top ? PP.pctOf(top, x.top, S.state.units) : ""; if (w !== x.w) { x.w = w; changed.push(j); } });
   return changed;
 }
+const daySig = (day) => JSON.stringify([day.items, day.note || "", day.warmup || "", day.cooldown || ""]);
+// The program day an in-progress workout came from, as the coach has it now (null if it's gone).
+function activeDayNow(a) {
+  const pr = program(); if (!a || !a.prog || !pr || pr.id !== a.prog.id || !pr.weeks[a.prog.w]) return null;
+  const days = pr.weeks[a.prog.w].days; return (a.prog.did ? days.find((x) => x.id === a.prog.did) : days[a.prog.d]) || null;
+}
+// Bring a started workout up to the coach's latest version. Exercises with sets already ticked keep what was logged.
+function refreshActive() {
+  const a = S.state.active, day = activeDayNow(a); if (!day) return false;
+  const used = new Set();
+  a.items = day.items.map((it) => { const k = a.items.findIndex((o, j) => !used.has(j) && o.ex === it.ex && o.sets.some((x) => x.done)); if (k >= 0) { used.add(k); return a.items[k]; } return rxEntry(it); });
+  a.coachNote = day.note || ""; a.warmup = day.warmup || ""; a.cooldown = day.cooldown || ""; a.sig = daySig(day);
+  saveState(); return true;
+}
 function startCoachDay(w, d) {
   const pr = program(); const day = pr && pr.weeks[w] && pr.weeks[w].days[d]; if (!day) return;
-  S.state.active = { routine: null, prog: { id: pr.id, w, d, did: day.id || null }, name: `Week ${w + 1} · ${day.name}`, coachNote: day.note || "", warmup: day.warmup || "", cooldown: day.cooldown || "", startedAt: new Date().toISOString(), note: "", restEndsAt: null, items: day.items.map(rxEntry) };
+  S.state.active = { sig: daySig(day), routine: null, prog: { id: pr.id, w, d, did: day.id || null }, name: `Week ${w + 1} · ${day.name}`, coachNote: day.note || "", warmup: day.warmup || "", cooldown: day.cooldown || "", startedAt: new Date().toISOString(), note: "", restEndsAt: null, items: day.items.map(rxEntry) };
   S.ui.summary = null; saveState(); location.hash = "#workout"; render(); window.scrollTo(0, 0);
 }
 function missingMaxes(day) { return [...new Set(day.items.filter((it) => ((it.load && it.load.t === "pct") || (it.groups || []).some((g) => g.load && g.load.t === "pct")) && !maxFor(it.ex)).map((it) => it.ex))]; }
@@ -769,7 +783,7 @@ function setRowHTML(ei, si, it, e, x, prev, workIdx, fields, lab) {
   const inp = (f, val, attrs) => `<input data-f="${f}" data-e="${ei}" data-s="${si}" value="${esc(val)}" ${attrs}>`;
   let cells = "";
   if (fields) cells = fields.map((f) => f === "w" ? (isBW(e.kind) ? inp("w", x.w > 0 ? fmt(x.w) : "", `inputmode="decimal" placeholder="+0" aria-label="Added weight"`) : inp("w", x.w ? fmt(x.w) : "", `inputmode="decimal" placeholder="${x.top ? x.top + "%" : S.state.units}" aria-label="Weight"`))
-      : f === "r" ? inp("r", x.r ?? "", `inputmode="numeric" placeholder="${x.t === "f" ? "max" : "reps"}" aria-label="Reps"`)
+      : f === "r" ? inp("r", x.r ?? "", `inputmode="numeric" placeholder="${x.rr ? x.rr : x.t === "f" ? "max" : "reps"}" aria-label="Reps${x.rr ? ", target " + x.rr : ""}"`)
       : f === "s" ? inp("s", x.s ? mmss(x.s) : "", `inputmode="numeric" placeholder="m:ss" aria-label="Time, minutes:seconds"`)
       : f === "d" ? inp("d", x.d ? fmt(x.d) : "", `inputmode="decimal" placeholder="dist" aria-label="Distance"`)
       : inp("h", x.h ? fmt(x.h) : "", `inputmode="decimal" placeholder="in" aria-label="Height in inches"`)).join("");
@@ -779,7 +793,7 @@ function setRowHTML(ei, si, it, e, x, prev, workIdx, fields, lab) {
   else if (e.track === "wd") cells = inp("w", fmt(x.w), `inputmode="decimal" aria-label="Weight"`) + inp("d", fmt(x.d), `inputmode="decimal" aria-label="Distance in ${distUnit(e)}"`);
   return `<div class="setrow${x.done ? " done" : ""}${miss ? " miss" : ""}${x.top ? " backoff" : ""}" style="--cols:${cols}">
     <button class="ty ${x.t}" data-act="set-type" data-e="${ei}" data-s="${si}" aria-label="Set type: ${{ n: "working", w: "warm-up", d: "drop set", f: "to failure" }[x.t]}. Tap to change.">${tyLabel}</button>
-    <span class="prev" title="Last time">${esc(prev ? setText(fields ? { ...e, fields } : e, prev) : "–")}</span>
+    <span class="prev" title="${lab ? esc(e.name) + " · last time" : "Last time"}">${lab ? `<b class="rn">${esc(e.name)}</b>` : ""}${esc(prev ? setText(fields ? { ...e, fields } : e, prev) : lab ? "" : "–")}</span>
     ${cells}
     <button class="ck" data-act="set-done" data-e="${ei}" data-s="${si}" aria-label="${x.done ? "Mark not done" : "Mark done"}" aria-pressed="${!!x.done}">✓</button>
   </div>`;
@@ -788,6 +802,9 @@ function renderWorkout() {
   const st = S.state;
   if (S.ui.summary) return renderSummary();
   const a = st.active;
+  // The coach changed this day after it was started: update it if nothing's logged yet, otherwise offer to.
+  let coachChanged = false;
+  if (a && a.prog) { const day = activeDayNow(a); if (day && a.sig && daySig(day) !== a.sig) { if (a.items.some((it) => it.sets.some((x) => x.done))) coachChanged = true; else refreshActive(); } else if (day && !a.sig) { a.sig = daySig(day); } }
   if (!a) {
     const pr = program(), nd = nextDay(pr);
     let coachPanel = "";
@@ -832,6 +849,7 @@ function renderWorkout() {
     ? `<div class="panel"><b>Finish with unchecked sets?</b><span class="sub">Unchecked working sets on exercises you started count as missed. Exercises with no checked sets are skipped.</span><div class="row end"><button class="btn ghost" data-act="confirm-no">Back</button><button class="btn primary" data-act="finish-yes">Finish</button></div></div>`
     : "";
   return `${header(`In progress · <span id="elapsed" class="num">${mmss((Date.now() - Date.parse(a.startedAt)) / 1000)}</span>`, esc(a.name), `<span class="sync cloud" title="Every number you type is saved right away"><i></i>Saved on this phone</span>`)}
+    ${coachChanged ? `<div class="msg action" style="align-self:stretch"><span class="grow">Your coach changed this workout after you started it.</span><button class="btn small primary" data-act="wk-refresh">Use the new version</button></div><p class="note">Exercises you’ve already ticked sets on keep what you logged.</p>` : ""}
     ${a.coachNote ? `<div class="coach-note">${PP.richText(a.coachNote)}</div>` : ""}${a.warmup ? `<div class="coach-note"><b>Warm-up:</b> ${PP.richText(a.warmup)}</div>` : ""}
     ${blocks.join("") || `<div class="empty">No exercises yet. Add your first one below.</div>`}
     ${a.cooldown ? `<div class="coach-note"><b>Cool-down:</b> ${PP.richText(a.cooldown)}</div>` : ""}
@@ -1325,9 +1343,11 @@ document.addEventListener("click", async (ev) => {
     case "start-day": startCoachDay(+b.dataset.w, +b.dataset.d); break;
     case "prog-sample": S.program = PPSample.program(); try { localStorage.removeItem("pp1.program"); } catch {} toast("Back to the sample program."); render(); break;
     case "open-day": S.ui.openDay = S.ui.openDay === b.dataset.k ? null : b.dataset.k; render(); break;
+    case "wk-refresh": if (refreshActive()) { render(); toast("Updated to your coach’s latest version."); } break;
     case "set-done": {
       const it = a.items[+b.dataset.e], x = it.sets[+b.dataset.s], e = getEx(it.ex);
       x.done = !x.done;
+      if (x.done && x.rr && (x.r === "" || x.r == null)) x.r = parseInt(x.rr, 10) || ""; // a rep range left blank logs its low end
       fillBackoffs(it);
       const g = groupInfo(a.items, +b.dataset.e);
       if (x.done && g && !g.last && x.t !== "w") { a.restEndsAt = null; toast(`No rest. Next: ${g.letter}${g.idx + 1} ${getEx(a.items[g.start + g.idx].ex).name}`); }
