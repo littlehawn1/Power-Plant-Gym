@@ -2,7 +2,7 @@
    Data lives on the phone and syncs to the client's account in the gym's Supabase project (see "Account + sync"). */
 (() => {
 "use strict";
-const APP_VERSION = "0.8.7";
+const APP_VERSION = "0.8.8";
 const PP = window.PPProgram;
 const APP_NAME = "Power Plant";
 
@@ -469,8 +469,31 @@ function warmupSets(it) {
   return PP.warmupPlan({ work: W, bar: e.barWeight || 0, max: maxFor(it.ex), step: smallStep(e.kind), def: pr && pr.warmupDefault, custom: it.rx && it.rx.warmup })
     .map(({ w, r }) => ({ t: "w", w, r, done: false }));
 }
+// Reopen a finished workout to fix mistakes. It opens like a workout in progress; "Save changes" puts it back in place.
+function editWorkout(id) {
+  if (S.state.active) { toast("Finish or discard the workout you have open first."); return; }
+  const w = S.workouts.find((x) => x.id === id); if (!w) return;
+  S.state.active = { editing: w.id, routine: w.routine || null, prog: w.prog || null, name: w.name, startedAt: w.date, note: w.note || "", restEndsAt: null, coachNote: "", warmup: "", cooldown: "",
+    items: (w.exercises || []).map((e) => e.question ? { ex: e.ex, note: "", rx: null, group: null, fields: [], sets: [], q: true, answer: e.answer || "" }
+      : { ex: e.ex, note: e.note || "", rx: e.rx || null, group: e.group || null, fields: e.fields || null, sets: (e.sets || []).map((x) => ({ ...x, done: true })) }) };
+  S.ui.summary = null; S.ui.confirm = null; saveState(); location.hash = "#workout"; render(); window.scrollTo(0, 0);
+}
+function saveEdit(a) {
+  const old = S.workouts.find((x) => x.id === a.editing); if (!old) { S.state.active = null; saveState(); render(); return; }
+  const exercises = a.items.filter((it) => (it.q ? (it.answer || "").trim() : it.sets.some((x) => x.done))).map((it) => {
+    const e = getEx(it.ex);
+    if (it.q) return { ex: it.ex, name: e.name, kind: "question", question: true, answer: it.answer.trim(), sets: [] };
+    return { ex: it.ex, name: e.name, kind: e.kind, muscle: e.muscle, track: e.track, repsMin: e.repsMin, repsMax: e.repsMax, rx: it.rx || null, group: it.group || null, fields: it.fields || null, note: it.note || "", sets: it.sets.filter((x) => x.done).map(({ done, ...x }) => x) };
+  });
+  const w = { ...old, note: a.note || "", exercises, edited: new Date().toISOString() };
+  w.volume = Math.round(exercises.reduce((n, ex) => n + ex.sets.filter((x) => x.t !== "w").reduce((m, x) => m + (+x.w || 0) * (+x.r || 0), 0), 0));
+  S.workouts = S.workouts.map((x) => (x.id === w.id ? w : x)); saveWorkouts();
+  S.state.active = null; S.ui.confirm = null; releaseWake(); saveState();
+  location.hash = "#history"; render(); toast("Changes saved. Your coach sees the corrected workout.");
+}
 function finishWorkout() {
   const a = S.state.active; if (!a) return;
+  if (a.editing) return saveEdit(a);
   const recBefore = records();
   const results = [];
   for (const it of a.items) {
@@ -618,9 +641,11 @@ function nextDay(pr) {
   }
   return first;
 }
+const MISSED_DAYS = 14; // missed workouts older than this drop off the list so they don't pile up
 function missedDays(pr) {
   if (!pr) return []; const done = programDone(pr), today = todayISO(), out = [];
-  pr.weeks.forEach((wk, w) => wk.days.forEach((day, d) => { if (day.date && day.date < today && !done[dayKey(w, d)]) out.push({ w, d, day }); }));
+  const c = new Date(); c.setDate(c.getDate() - MISSED_DAYS); const cutoff = `${c.getFullYear()}-${String(c.getMonth() + 1).padStart(2, "0")}-${String(c.getDate()).padStart(2, "0")}`;
+  pr.weeks.forEach((wk, w) => wk.days.forEach((day, d) => { if (day.date && day.date < today && day.date >= cutoff && !done[dayKey(w, d)]) out.push({ w, d, day }); }));
   return out;
 }
 // The max that percentages use: the coach's target max for this lift, then the client's own, then their 5RM ÷ 0.83, then logged history.
@@ -820,7 +845,7 @@ function renderWorkout() {
   const a = st.active;
   // The coach changed this day after it was started: update it if nothing's logged yet, otherwise offer to.
   let coachChanged = false;
-  if (a && a.prog) { const day = activeDayNow(a); if (day && a.sig && daySig(day) !== a.sig) { if (a.items.some((it) => it.sets.some((x) => x.done))) coachChanged = true; else refreshActive(); } else if (day && !a.sig) { a.sig = daySig(day); } }
+  if (a && a.prog && !a.editing) { const day = activeDayNow(a); if (day && a.sig && daySig(day) !== a.sig) { if (a.items.some((it) => it.sets.some((x) => x.done))) coachChanged = true; else refreshActive(); } else if (day && !a.sig) { a.sig = daySig(day); } }
   if (!a) {
     const pr = program(), nd = nextDay(pr);
     let coachPanel = "";
@@ -860,11 +885,12 @@ function renderWorkout() {
   const blocks = [];
   for (let ei = 0; ei < a.items.length; ei++) { const g = groupInfo(a.items, ei); if (g) { blocks.push(groupCardHTML(a, g)); ei = g.end; } else blocks.push(exCardHTML(a, ei)); }
   const confirm = S.ui.confirm === "cancel"
-    ? `<div class="panel"><b>Discard this workout?</b><span class="sub">Nothing from this session will be saved and your weights stay as they were.</span><div class="row end"><button class="btn ghost" data-act="confirm-no">Keep going</button><button class="btn danger" data-act="cancel-yes">Discard</button></div></div>`
+    ? a.editing ? `<div class="panel"><b>Cancel your changes?</b><span class="sub">The workout stays the way it was saved.</span><div class="row end"><button class="btn ghost" data-act="confirm-no">Keep editing</button><button class="btn danger" data-act="cancel-yes">Cancel changes</button></div></div>`
+    : `<div class="panel"><b>Discard this workout?</b><span class="sub">Nothing from this session will be saved and your weights stay as they were.</span><div class="row end"><button class="btn ghost" data-act="confirm-no">Keep going</button><button class="btn danger" data-act="cancel-yes">Discard</button></div></div>`
     : S.ui.confirm === "finish"
     ? `<div class="panel"><b>Finish with unchecked sets?</b><span class="sub">Unchecked working sets on exercises you started count as missed. Exercises with no checked sets are skipped.</span><div class="row end"><button class="btn ghost" data-act="confirm-no">Back</button><button class="btn primary" data-act="finish-yes">Finish</button></div></div>`
     : "";
-  return `${header(`In progress · <span id="elapsed" class="num">${mmss((Date.now() - Date.parse(a.startedAt)) / 1000)}</span>`, esc(a.name), `${PREVIEW ? `<span class="sync cloud">Preview · not saved</span>` : `<span class="sync cloud" title="Every number you type is saved right away"><i></i>Saved on this phone</span>`}`)}
+  return `${header(a.editing ? `Editing · ${dateLabel(a.startedAt)}` : `In progress · <span id="elapsed" class="num">${mmss((Date.now() - Date.parse(a.startedAt)) / 1000)}</span>`, esc(a.name), `${PREVIEW ? `<span class="sync cloud">Preview · not saved</span>` : `<span class="sync cloud" title="Every number you type is saved right away"><i></i>Saved on this phone</span>`}`)}
     ${coachChanged ? `<div class="msg action" style="align-self:stretch"><span class="grow">Your coach changed this workout after you started it.</span><button class="btn small primary" data-act="wk-refresh">Use the new version</button></div><p class="note">Exercises you’ve already ticked sets on keep what you logged.</p>` : ""}
     ${a.coachNote ? `<div class="coach-note">${PP.richText(a.coachNote)}</div>` : ""}${a.warmup ? `<div class="coach-note"><b>Warm-up:</b> ${PP.richText(a.warmup)}</div>` : ""}
     ${blocks.join("") || `<div class="empty">No exercises yet. Add your first one below.</div>`}
@@ -872,7 +898,7 @@ function renderWorkout() {
     <button class="btn wide" data-act="add-ex" data-target="active">+ Add exercise</button>
     <textarea class="ex-note" data-wnote="1" rows="2" placeholder="${a.prog ? "Note for your coach: how it felt, anything that hurt, questions…" : "Workout note: sleep, energy, anything worth remembering…"}" aria-label="Workout note">${esc(a.note)}</textarea>
     ${confirm}
-    <div class="row"><button class="btn ghost" data-act="cancel">Discard</button><span class="grow"></span><button class="btn primary" data-act="finish">Finish workout</button></div>`;
+    <div class="row"><button class="btn ghost" data-act="cancel">${a.editing ? "Cancel changes" : "Discard"}</button><span class="grow"></span><button class="btn primary" data-act="finish">${a.editing ? "Save changes" : "Finish workout"}</button></div>`;
 }
 
 /* ---- Workout cards ---- */
@@ -1174,7 +1200,7 @@ function renderHistory() {
     }).join("");
     const confirming = S.ui.confirm === "del:" + w.id;
     return `<div class="log-item"><div class="hd"><b>${esc(wName(w))}</b><span class="sub">${dateLabel(w.date)}${w.minutes ? ` · ${w.minutes} min` : ""}</span></div>${lines}${w.note ? `<span class="sub">Note: ${esc(w.note)}</span>` : ""}
-      <div class="row end">${confirming ? `<span class="sub grow">Delete this entry? Weights won’t change.</span><button class="btn small ghost" data-act="confirm-no">Keep</button><button class="btn small danger" data-act="del-yes" data-id="${esc(w.id)}">Delete</button>` : `${CL.user ? `<button class="btn small ghost" data-act="fc" data-w="${esc(w.id)}">🎥 Form check</button>` : ""}<button class="btn small ghost" data-act="del" data-id="${esc(w.id)}">Delete</button>`}</div></div>`;
+      <div class="row end">${confirming ? `<span class="sub grow">Delete this entry? Weights won’t change.</span><button class="btn small ghost" data-act="confirm-no">Keep</button><button class="btn small danger" data-act="del-yes" data-id="${esc(w.id)}">Delete</button>` : `${CL.user ? `<button class="btn small ghost" data-act="fc" data-w="${esc(w.id)}">🎥 Form check</button>` : ""}<button class="btn small ghost" data-act="wedit" data-id="${esc(w.id)}">Edit</button><button class="btn small ghost" data-act="del" data-id="${esc(w.id)}">Delete</button>`}</div></div>`;
   }).join("");
   return `${header(`${S.workouts.length} workout${S.workouts.length === 1 ? "" : "s"} logged`, "Progress")}
     <section class="panel"><h2>Last 7 days</h2>
@@ -1392,6 +1418,7 @@ document.addEventListener("click", async (ev) => {
     }
     case "finish-yes": finishWorkout(); break;
     case "cancel": S.ui.confirm = "cancel"; render(); break;
+    case "wedit": editWorkout(b.dataset.id); break;
     case "cancel-yes": st.active = null; S.ui.confirm = null; releaseWake(); saveState(); render(); break;
     case "confirm-no": S.ui.confirm = null; render(); break;
     case "rest-sub": if (a?.restEndsAt) { a.restEndsAt = new Date(Math.max(Date.now(), Date.parse(a.restEndsAt) - 15000)).toISOString(); saveState(); syncRest(); } break;
