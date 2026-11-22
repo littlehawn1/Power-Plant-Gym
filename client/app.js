@@ -2,7 +2,7 @@
    Data lives on the phone and syncs to the client's account in the gym's Supabase project (see "Account + sync"). */
 (() => {
 "use strict";
-const APP_VERSION = "0.8.8";
+const APP_VERSION = "0.8.9";
 const PP = window.PPProgram;
 const APP_NAME = "Power Plant";
 
@@ -197,6 +197,8 @@ const LIB_ROWS = [
 ];
 const KINDS = ["barbell", "dumbbell", "kettlebell", "machine", "cable", "bodyweight", "band", "strongman", "other", "cardio"];
 const isBW = (k) => k === "bodyweight" || k === "band"; // logged as reps, with optional added weight
+const isBand = (k) => k === "band"; // resistance bands: logged by band colour instead of weight
+const bandList = () => (S.program && Array.isArray(S.program.bands) && S.program.bands.length ? S.program.bands : PP.DEFAULT_BANDS);
 const TRACKS = { wr: "Weight × reps", time: "Time", dt: "Distance + time", wd: "Weight + distance" };
 const MUSCLES = ["Chest", "Back", "Shoulders", "Rear delts", "Traps", "Legs", "Quads", "Hamstrings", "Glutes", "Calves", "Lower back", "Biceps", "Triceps", "Core", "Grip", "Conditioning", "Other"];
 const LIB = {};
@@ -400,7 +402,8 @@ function lastSession(exId, before) {
 }
 function setText(e, x) {
   if (!x) return "–";
-  if (e.fields) return e.fields.map((f) => f === "w" ? (x.w ? fmt(x.w) + " " + S.state.units : "") : f === "r" ? (x.r !== "" && x.r != null ? x.r + " reps" : "") : f === "s" ? (x.s ? mmss(x.s) : "") : f === "d" ? (x.d ? fmt(x.d) + " " + distUnit(e) : "") : f === "h" ? (x.h ? fmt(x.h) + " in" : "") : "").filter(Boolean).join(" · ") || "–";
+  if (e.fields) return e.fields.map((f) => f === "w" ? (x.band ? x.band + " band" : x.w ? fmt(x.w) + " " + S.state.units : "") : f === "r" ? (x.r !== "" && x.r != null ? x.r + " reps" : "") : f === "s" ? (x.s ? mmss(x.s) : "") : f === "d" ? (x.d ? fmt(x.d) + " " + distUnit(e) : "") : f === "h" ? (x.h ? fmt(x.h) + " in" : "") : "").filter(Boolean).join(" · ") || "–";
+  if (isBand(e.kind) && x.band && !e.fields) return `${x.band} band × ${x.r}`;
   if (e.track === "time") return mmss(x.s);
   if (e.track === "dt") return `${fmt(x.d)} ${distUnit(e)} · ${mmss(x.s)}`;
   if (e.track === "wd") return `${fmt(x.w)}×${fmt(x.d)}${distUnit(e)}`;
@@ -670,7 +673,7 @@ function groupWeight(id, load) {
   if (!load) return lastTopWeight(id) || getEx(id).weight;
   if (load.t === "lb" || load.t === "kg") return load.v;
   if (load.t === "pct") return pctWeight(id, load.v) || lastTopWeight(id) || getEx(id).weight;
-  if (load.t === "bw" || load.t === "top") return 0; // back-offs fill in once today's top set is logged
+  if (load.t === "bw" || load.t === "top" || load.t === "band") return 0; // back-offs fill in once today's top set is logged
   return lastTopWeight(id) || getEx(id).weight;
 }
 function rxText(it, grouped) {
@@ -704,6 +707,7 @@ function rxEntry(it) {
     for (const g of groups) for (let i = 0; i < g.sets; i++) {
       const x = { t: g.amrap ? "f" : "n", done: false };
       if (g.load && g.load.t === "top") x.top = g.load.v;
+      if (g.load && g.load.t === "band") x.band = g.load.v;
       if (fields.includes("w")) x.w = g.build ? (lastTopWeight(it.ex) || "") : groupWeight(it.ex, g.load);
       if (fields.includes("r")) { if (g.reps && g.repsMax) { x.r = ""; x.rr = `${g.reps}–${g.repsMax}`; } else x.r = g.reps || (g.amrap ? "" : g.repsMax || e.repsMax); }
       if (fields.includes("s")) x.s = g.time || 0;
@@ -820,14 +824,16 @@ function setRowHTML(ei, si, it, e, x, prev, workIdx, fields, lab) {
   const cols = fields ? fields.length : e.track === "time" ? 1 : 2;
   const miss = x.done && e.track === "wr" && x.t !== "w" && x.r < e.repsMin;
   // In supersets/circuits each row can record different things, so every box gets its own small label.
-  const cap = { w: isBW(e.kind) ? "+" + S.state.units : S.state.units, r: "reps", s: "time", d: distUnit(e), h: "in" };
+  const cap = { w: isBand(e.kind) ? "band" : isBW(e.kind) ? "+" + S.state.units : S.state.units, r: "reps", s: "time", d: distUnit(e), h: "in" };
   const inp = (f, val, attrs) => { const el = `<input data-f="${f}" data-e="${ei}" data-s="${si}" value="${esc(val)}" ${attrs}>`; return lab ? `<label class="cellcap"><span class="cap">${cap[f]}</span>${el}</label>` : el; };
   let cells = "";
-  if (fields) cells = fields.map((f) => f === "w" ? (isBW(e.kind) ? inp("w", x.w > 0 ? fmt(x.w) : "", `inputmode="decimal" placeholder="+0" aria-label="Added weight"`) : inp("w", x.w ? fmt(x.w) : "", `inputmode="decimal" placeholder="${x.top ? x.top + "%" : S.state.units}" aria-label="Weight"`))
+  const bandSel = () => { const el = `<select class="bandsel" data-f="band" data-e="${ei}" data-s="${si}" aria-label="Band colour"><option value="">Band…</option>${bandList().map((b) => `<option ${x.band === b ? "selected" : ""}>${esc(b)}</option>`).join("")}${x.band && !bandList().includes(x.band) ? `<option selected>${esc(x.band)}</option>` : ""}</select>`; return lab ? `<label class="cellcap"><span class="cap">band</span>${el}</label>` : el; };
+  if (fields) cells = fields.map((f) => f === "w" && isBand(e.kind) ? bandSel() : f === "w" ? (isBW(e.kind) ? inp("w", x.w > 0 ? fmt(x.w) : "", `inputmode="decimal" placeholder="+0" aria-label="Added weight"`) : inp("w", x.w ? fmt(x.w) : "", `inputmode="decimal" placeholder="${x.top ? x.top + "%" : S.state.units}" aria-label="Weight"`))
       : f === "r" ? inp("r", x.r ?? "", `inputmode="numeric" placeholder="${x.rr ? x.rr : x.t === "f" ? "max" : "reps"}" aria-label="Reps${x.rr ? ", target " + x.rr : ""}"`)
       : f === "s" ? inp("s", x.s ? mmss(x.s) : "", `inputmode="numeric" placeholder="m:ss" aria-label="Time, minutes:seconds"`)
       : f === "d" ? inp("d", x.d ? fmt(x.d) : "", `inputmode="decimal" placeholder="dist" aria-label="Distance"`)
       : inp("h", x.h ? fmt(x.h) : "", `inputmode="decimal" placeholder="in" aria-label="Height in inches"`)).join("");
+  else if (e.track === "wr" && isBand(e.kind)) cells = bandSel() + inp("r", x.r ?? "", `inputmode="numeric" placeholder="${x.rr || "reps"}" aria-label="Reps"`);
   else if (e.track === "wr") cells = (isBW(e.kind) ? inp("w", x.w > 0 ? fmt(x.w) : "", `inputmode="decimal" placeholder="+0" aria-label="Added weight"`) : inp("w", fmt(x.w), `inputmode="decimal" aria-label="Weight"`)) + inp("r", x.r ?? "", `inputmode="numeric" aria-label="Reps"`);
   else if (e.track === "time") cells = inp("s", mmss(x.s), `inputmode="numeric" aria-label="Time, minutes:seconds"`);
   else if (e.track === "dt") cells = inp("d", fmt(x.d), `inputmode="decimal" aria-label="Distance in ${distUnit(e)}"`) + inp("s", mmss(x.s), `inputmode="numeric" aria-label="Time"`);
@@ -905,7 +911,7 @@ function renderWorkout() {
 function prevFor(it) { const prev = lastSession(it.ex); return { work: prev ? prev.sets.filter((x) => x.t !== "w") : [], warm: prev ? prev.sets.filter((x) => x.t === "w") : [] }; }
 function heads(it, e) {
   const du = it.rx && it.rx.groups && it.rx.groups[0] && it.rx.groups[0].distUnit;
-  return it.fields ? it.fields.map((f) => ({ w: isBW(e.kind) ? "+" + S.state.units : S.state.units, r: "Reps", s: "Time", d: du || distUnit(e), h: "Height" }[f])) : e.track === "wr" ? [isBW(e.kind) ? "+" + S.state.units : S.state.units, "Reps"] : e.track === "time" ? ["Time"] : e.track === "dt" ? [distUnit(e), "Time"] : [S.state.units, distUnit(e)];
+  return it.fields ? it.fields.map((f) => ({ w: isBand(e.kind) ? "Band" : isBW(e.kind) ? "+" + S.state.units : S.state.units, r: "Reps", s: "Time", d: du || distUnit(e), h: "Height" }[f])) : e.track === "wr" ? [isBand(e.kind) ? "Band" : isBW(e.kind) ? "+" + S.state.units : S.state.units, "Reps"] : e.track === "time" ? ["Time"] : e.track === "dt" ? [distUnit(e), "Time"] : [S.state.units, distUnit(e)];
 }
 function barPicker(it, e, topW) {
   if (e.kind !== "barbell" || !(it.fields ? it.fields.includes("w") : e.track === "wr")) return "";
@@ -1483,6 +1489,7 @@ document.addEventListener("click", async (ev) => {
 document.addEventListener("input", (ev) => {
   if (ev.target.dataset && ev.target.dataset.ans != null && S.state.active) { const it = S.state.active.items[+ev.target.dataset.ans]; if (it) { it.answer = ev.target.value; saveState(); } return; }
   const t = ev.target;
+  if (t.dataset.f === "band" && S.state.active) { const x = S.state.active.items[+t.dataset.e]?.sets[+t.dataset.s]; if (x) { x.band = t.value; saveState(); } return; }
   if (t.dataset.f && S.state.active) {
     const x = S.state.active.items[+t.dataset.e]?.sets[+t.dataset.s]; if (!x) return;
     if (t.dataset.f === "s") x.s = parseTime(t.value); else if (t.dataset.f === "r") x.r = Math.max(0, Math.round(NUM(t.value))); else x[t.dataset.f] = NUM(t.value);

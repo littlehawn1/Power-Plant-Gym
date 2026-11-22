@@ -40,6 +40,7 @@ function migrate(d) {
   d.maxTemplates = d.maxTemplates || [{ id: "mt1", name: "Squat, bench, deadlift", lifts: ["squat", "bench", "deadlift"] }];
   d.dayNotes = d.dayNotes || {};
   d.warmupDefault = P.warmupDefaultOf(d.warmupDefault);
+  d.bands = Array.isArray(d.bands) && d.bands.length ? d.bands : P.DEFAULT_BANDS.slice();
   if (!d.qMarked) { // TrueCoach check-in questions came in as exercises; mark them as questions once
     for (const e of Object.values(d.custom || {})) if (e && e.name && QRE.test(e.name.trim()) && e.kind !== "question") { e.kind = "question"; e.fields = []; d._qChanged = (d._qChanged || 0) + 1; }
     d.qMarked = true;
@@ -90,7 +91,7 @@ async function loadCloud() {
   for (const r of wo.data) d.logs.push({ ...(r.data || {}), id: r.id, clientId: r.client_id });
   for (const n of dn.data) (d.dayNotes[n.client_id] = d.dayNotes[n.client_id] || {})[n.day] = n.note;
   const s = (gs.data.find((x) => x.key === "coach") || {}).data || {};
-  d.custom = s.custom || {}; if (s.maxTemplates) d.maxTemplates = s.maxTemplates; if (s.warmupDefault) d.warmupDefault = s.warmupDefault; if (s.qMarked) d.qMarked = true;
+  d.custom = s.custom || {}; if (s.maxTemplates) d.maxTemplates = s.maxTemplates; if (s.warmupDefault) d.warmupDefault = s.warmupDefault; if (s.qMarked) d.qMarked = true; if (Array.isArray(s.bands) && s.bands.length) d.bands = s.bands;
   d.noArchive = noArchive;
   migrate(d);
   return d;
@@ -105,12 +106,12 @@ function rowsOf(d) {
   }
   for (const p of d.programs) {
     const used = new Set((p.days || []).flatMap((x) => (x.blocks || []).map((b) => b.ex)));
-    const data = { ...p, warmupDefault: d.warmupDefault, exercises: Object.fromEntries(Object.entries(d.custom || {}).filter(([id]) => used.has(id))) };
+    const data = { ...p, warmupDefault: d.warmupDefault, bands: d.bands, exercises: Object.fromEntries(Object.entries(d.custom || {}).filter(([id]) => used.has(id))) };
     delete data.clientId; delete data.template; delete data._at;
     out.prog[p.id] = { id: p.id, client_id: p.template ? null : p.clientId || null, name: p.name || "", data };
   }
   for (const [cid, days] of Object.entries(d.dayNotes || {})) for (const [day, note] of Object.entries(days)) if (note) out.day[cid + "|" + day] = { client_id: cid, day, note };
-  out.set.coach = { key: "coach", data: { custom: d.custom || {}, maxTemplates: d.maxTemplates || [], warmupDefault: d.warmupDefault, qMarked: !!d.qMarked } };
+  out.set.coach = { key: "coach", data: { custom: d.custom || {}, maxTemplates: d.maxTemplates || [], warmupDefault: d.warmupDefault, qMarked: !!d.qMarked, bands: d.bands } };
   return out;
 }
 const hashRows = (r) => Object.fromEntries(Object.entries(r).map(([k, m]) => [k, Object.fromEntries(Object.entries(m).map(([id, v]) => [id, Cloud.hash(v)]))]));
@@ -343,7 +344,7 @@ function renderClients() {
 }
 
 function setsText(e) {
-  return (e.sets || []).filter((x) => x.t !== "w").map((x) => [x.w ? x.w + (x.r ? "×" + x.r : "") : x.r ? x.r + " reps" : "", x.d ? x.d + "yd" : "", x.s ? mmss(x.s) : "", x.h ? x.h + "in" : ""].filter(Boolean).join(" ")).join(", ");
+  return (e.sets || []).filter((x) => x.t !== "w").map((x) => [x.band ? `${x.band} band${x.r ? " × " + x.r : ""}` : x.w ? x.w + (x.r ? "×" + x.r : "") : x.r ? x.r + " reps" : "", x.d ? x.d + "yd" : "", x.s ? mmss(x.s) : "", x.h ? x.h + "in" : ""].filter(Boolean).join(" ")).join(", ");
 }
 const rxStr = (e) => (typeof e.rx === "string" ? e.rx : e.rx ? P.prescriptionText(e.rx) : "");
 // What a coach should notice in a finished workout: PRs and new maxes, missed reps or sets, pain.
@@ -613,6 +614,9 @@ function renderSettings() {
       <p class="sub" id="coach-note" hidden>Only owners can add or remove coaches.</p>
       <form class="row" id="coach-add" style="margin-top:8px" hidden><input class="in grow" id="coach-email" type="email" placeholder="New coach’s email" autocomplete="off" required><button class="btn primary">Add coach</button></form>
       <p class="sub">Then send them the dashboard link (<a href="${esc(location.href.split("#")[0])}">${esc(location.href.split("#")[0])}</a>). They tap <b>Create an account</b> with that email, or just sign in if they already have one in the app.</p></section>` : ""}
+    <section class="panel" style="max-width:760px"><h2>Resistance bands</h2>
+      <p class="sub">Band exercises are logged by band colour instead of weight. List the gym’s bands from lightest to heaviest, separated by commas. In a program, write e.g. <b>3x12 @ red band</b>.</p>
+      <input class="in" id="bands" value="${esc((db.bands || []).join(", "))}"></section>
     <section class="panel" style="max-width:760px"><h2>Warm-up sets</h2>
       <p class="sub">When a lift has warm-up sets turned on (in the program, under that exercise’s Settings), the client app fills them in before the first working set. The weights go up in even jumps from the empty bar to the working weight, rounded up to the nearest 5 lb.</p>
       <div class="form3">
@@ -826,7 +830,7 @@ function moveSession(drag, date) {
 const BAR = 45;
 // Text for one load or rep target, written the way the program cells are typed (so it reads back the same).
 const loadTok = (L) => { if (!L) return ""; const v = L.vMax ? `${L.v}-${L.vMax}` : `${L.v}`; return L.t === "pct" ? `${v}%` : L.t === "lb" ? v : L.t === "kg" ? `${v} kg` : L.t === "top" ? `${L.v}% of todays top` : L.t === "rpe" ? `RPE ${v}` : loadTok2(L); };
-const loadTok2 = (L) => L.t === "rir" ? `RIR ${L.v}` : L.t === "bw" ? "bw" : "";
+const loadTok2 = (L) => L.t === "band" ? `${L.v.toLowerCase()} band` : L.t === "rir" ? `RIR ${L.v}` : L.t === "bw" ? "bw" : "";
 const repTok = (g) => (g.amrap && !g.reps ? "AMRAP" : g.amrap ? `${g.reps}+` : g.repsMax ? `${g.reps}-${g.repsMax}` : `${g.reps}`) + (g.per ? `/${g.per}` : "");
 const SKIPC = /^(skip|off|none|n\/a|-+|—)$/i, NOWU = /^\s*(none|no|off|skip)\s*$/i;
 // One exercise in a scheduled workout: the warm-up and every working set, each with editable reps and weight.
@@ -838,7 +842,7 @@ function setsFor(text, ex, c, b, p, bi) {
   const asText = tr.errors.length || tr.loose || !tr.groups.length, tw = asText ? P.textWarmup(t, tr.groups) : null; // "Warm up: 4x5" in the text (still the warm-up after the sets were edited)
   const r = rowsTxt ? P.parsePrescription(rowsTxt) : tw ? { ...tr, groups: tw.groups } : tr;
   const max = c && c.maxes && c.maxes[ex] ? P.targetOf(c.maxes[ex], UNITS) : 0;
-  const editable = bi != null && r.groups.every((g) => !g.time && !g.dist && !g.capped && !g.build);
+  const editable = bi != null && r.groups.every((g) => !g.time && !g.dist && !g.capped && !g.build), band = exMeta(ex).kind === "band";
   const rows = []; let n = 0, top = 0, missingMax = false;
   for (const g of r.groups) {
     const reps = g.capped ? `AMRAP in ${mmss(g.time)}` : g.time ? mmss(g.time) : g.dist ? `${g.dist} ${g.distUnit || ""}` : g.amrap ? (g.reps ? `${g.reps}+ reps` : "as many reps as possible") : `${g.reps}${g.repsMax ? "–" + g.repsMax : ""} rep${g.reps === 1 && !g.repsMax ? "" : "s"}`;
@@ -856,7 +860,7 @@ function setsFor(text, ex, c, b, p, bi) {
       rows.push(editable
         ? `<div class="ssr ed" data-row="${bi}" data-load="${esc(loadTok(L))}" data-calc="${calc}" data-label="${i === 0 && g.label ? esc(g.label) : ""}"><span class="sub num">Set ${n}</span>
             <span><input class="in num ss-in" data-ss="r" value="${esc(g.reps || g.amrap ? repTok(g) : "")}" placeholder="reps" aria-label="Set ${n} reps" size="4"> reps</span>
-            <span><input class="in num ss-in wide" data-ss="w" value="${calc}" placeholder="${esc(L && !calc ? (L.t === "rpe" ? "RPE " + pv : L.t === "top" ? L.v + "% top" : L.t === "pct" ? L.v + "%" : "") : "weight")}" aria-label="Set ${n} weight" size="5"> lb ${hint ? `<span class="sub">${esc(hint)}</span>` : ""}${i === 0 && g.label ? ` <span class="sub">(${esc(g.label)})</span>` : ""}</span>
+            <span>${band ? `<select class="in ss-in wide" data-ss="band" aria-label="Set ${n} band"><option value="">Band…</option>${(db.bands || []).map((x) => `<option ${L && L.t === "band" && L.v.toLowerCase() === x.toLowerCase() ? "selected" : ""}>${esc(x)}</option>`).join("")}</select> band</span><span hidden>` : ""}<input class="in num ss-in wide" data-ss="w" value="${calc}" placeholder="${esc(L && !calc ? (L.t === "rpe" ? "RPE " + pv : L.t === "top" ? L.v + "% top" : L.t === "pct" ? L.v + "%" : "") : "weight")}" aria-label="Set ${n} weight" size="5"> lb ${hint ? `<span class="sub">${esc(hint)}</span>` : ""}${i === 0 && g.label ? ` <span class="sub">(${esc(g.label)})</span>` : ""}</span>
             <button class="icon ss-x" data-act="ss-del" title="Remove this set" aria-label="Remove set ${n}">×</button></div>`
         : `<div class="ssr"><span class="sub num">Set ${n}</span><span>${reps}${g.per ? " each " + esc(g.per) : ""}</span><span>${wt}</span></div>`);
     }
@@ -881,11 +885,11 @@ function setsFor(text, ex, c, b, p, bi) {
 function rowsToLine(bi, oldText) {
   const r = P.parsePrescription(oldText || ""), parts = [];
   for (const row of document.querySelectorAll(`.ssr.ed[data-row="${bi}"]`)) {
-    const rIn = row.querySelector('[data-ss="r"]').value.trim(), wIn = row.querySelector('[data-ss="w"]').value.trim();
+    const rIn = row.querySelector('[data-ss="r"]').value.trim(), wIn = row.querySelector('[data-ss="w"]').value.trim(), bandEl = row.querySelector('[data-ss="band"]');
     const reps = /^(\d+(\+|\s*-\s*\d+)?|amrap)(\/\w+)?$/i.test(rIn) ? rIn.replace(/\s+/g, "") : "1";
     const wr = wIn.replace(/\s+/g, "").replace(/–/g, "-"), mr = wr.match(/^(\d+(?:\.\d+)?)(?:-(\d+(?:\.\d+)?))?$/);
     const typed = mr && +mr[1] > 0 ? (mr[2] && +mr[2] > +mr[1] ? `${+mr[1]}-${+mr[2]}` : String(+mr[1])) : "";
-    const load = typed && typed !== String(row.dataset.calc).replace(/\s+/g, "") ? typed : row.dataset.load; // blank or unchanged keeps the program's %, RPE…
+    const load = bandEl ? (bandEl.value ? `${bandEl.value.toLowerCase()} band` : (/band$/i.test(row.dataset.load) ? "" : row.dataset.load)) : typed && typed !== String(row.dataset.calc).replace(/\s+/g, "") ? typed : row.dataset.load; // blank or unchanged keeps the program's %, RPE…
     const last = parts[parts.length - 1], label = row.dataset.label;
     if (last && last.reps === reps && last.load === load && !label) last.n++;
     else parts.push({ n: 1, reps, load, label });
@@ -950,7 +954,7 @@ function previewApp(cid) {
   const pick = appProgram(cid);
   const maxes = {}; for (const [ex, m] of Object.entries(c.maxes || {})) { const o = {}; for (const k of ["rm5", "rm1", "target"]) if (m[k] > 0) o[k] = +m[k]; maxes[ex] = o; }
   let program = null;
-  if (pick) { const used = new Set(pick.days.flatMap((d) => d.blocks.map((b) => b.ex))); program = { ...clone(pick), _at: undefined, warmupDefault: db.warmupDefault, exercises: Object.fromEntries(Object.entries(db.custom).filter(([id]) => used.has(id))), maxes, sample: false, cloud: true }; delete program.clientId; delete program.template; }
+  if (pick) { const used = new Set(pick.days.flatMap((d) => d.blocks.map((b) => b.ex))); program = { ...clone(pick), _at: undefined, warmupDefault: db.warmupDefault, bands: db.bands, exercises: Object.fromEntries(Object.entries(db.custom).filter(([id]) => used.has(id))), maxes, sample: false, cloud: true }; delete program.clientId; delete program.template; }
   const workouts = logsOf(cid).map((l) => { const w = { ...l }; delete w.clientId; return w; });
   try { localStorage.setItem("ppc1.preview", JSON.stringify({ name: c.name, units: "lb", program, workouts })); } catch { toast("Couldn’t open the preview in this browser."); return; }
   const win = window.open(new URL("../app/?preview=1#workout", location.href).href, "_blank");
@@ -1185,7 +1189,7 @@ document.addEventListener("click", (ev) => {
     }
     case "download": {
       const c = client(p.clientId), used = new Set(p.days.flatMap((d) => d.blocks.map((b) => b.ex)));
-      const out = { ...clone(p), warmupDefault: db.warmupDefault, maxes: c ? clone(c.maxes) : {}, exercises: Object.fromEntries(Object.entries(db.custom).filter(([id]) => used.has(id))) };
+      const out = { ...clone(p), warmupDefault: db.warmupDefault, bands: db.bands, maxes: c ? clone(c.maxes) : {}, exercises: Object.fromEntries(Object.entries(db.custom).filter(([id]) => used.has(id))) };
       for (const m of Object.values(out.maxes)) delete m.pending;
       const blob = new Blob([JSON.stringify(out, null, 1)], { type: "application/json" }), url = URL.createObjectURL(blob);
       const el = document.createElement("a"); el.href = url; el.download = `${p.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.json`; document.body.appendChild(el); el.click(); el.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
@@ -1237,6 +1241,7 @@ document.addEventListener("change", (ev) => {
   if (t.id === "sc-start" && UI.sched) { UI.sched.start = t.value; schedRedraw(); return; }
   if (t.classList && t.classList.contains("sc-wd") && UI.sched) { UI.sched.wds = [...document.querySelectorAll(".sc-wd:checked")].map((x) => +x.value); schedRedraw(); return; }
   if (t.id === "ex-f") { UI.exF = t.value; $("#ex-list").innerHTML = exListHTML(); return; }
+  if (t.id === "bands") { const list = [...new Set(t.value.split(/[,\n]+/).map((x) => x.trim()).filter(Boolean).map((x) => x.replace(/\b\w/g, (ch) => ch.toUpperCase())))]; if (!list.length) { toast("List at least one band."); route(); return; } db.bands = list; save(); route(); toast("Band colours saved. Clients get them with their program."); return; }
   if (["wu-reps", "wu-at", "wu-heavy"].includes(t.id)) {
     db.warmupDefault = P.warmupDefaultOf({ reps: $("#wu-reps").value, heavyAt: +$("#wu-at").value, heavyReps: $("#wu-heavy").value });
     save(); route(); toast("Warm-up default saved. Clients get it the next time their app loads."); return;

@@ -351,3 +351,6 @@ details.past summary { cursor: pointer; font-weight: 600; }
 .cellcap { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .cellcap .cap { font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted, #9a9ca0); text-align: center; line-height: 1; }
 .cellcap input { width: 100%; }
+
+/* Band colour picker in place of a weight box */
+.bandsel { font: inherit; font-weight: 700; min-width: 0; width: 100%; padding: 10px 6px; border-radius: 10px; border: 1px solid var(--line, #3a3c3f); background: var(--surface, #1f2022); color: inherit; text-align: center; }

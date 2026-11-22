@@ -53,6 +53,7 @@
     if ((m = s.match(/^(\d+(?:\.\d+)?)\s*%\s*(?:of\s+)?(?:today'?s\s+|todays\s+)?(?:top|heaviest)(?:\s*(?:set|wt|weight|single|double|triple|of the day))?$/i))) return { t: "top", v: num(m[1]) };
     if ((m = s.match(/^(\d+(?:\.\d+)?)\s*%\s*(?:of\s+)?(?:(?:your|the)\s+)?(?:(?:est(?:imated)?\.?|target|training|tm)\s*)?(?:1\s*rm|e1rm|max)?$/i))) return { t: "pct", v: num(m[1]) };
     if ((m = s.match(/^rpe\s*(\d+(?:\.\d+)?)$/i))) return { t: "rpe", v: num(m[1]) };
+    if ((m = s.match(/^([a-z][a-z -]{1,20}?)\s+band$/i))) return { t: "band", v: m[1].trim().replace(/\b\w/g, (c) => c.toUpperCase()) }; // "red band"
     if ((m = s.match(/^rir\s*(\d+(?:\.\d+)?)$/i))) return { t: "rir", v: num(m[1]) };
     if ((m = s.match(/^(\d+(?:\.\d+)?)\s*(lb|lbs|kg)?$/i))) return { t: m[2] && m[2].toLowerCase() === "kg" ? "kg" : "lb", v: num(m[1]) };
     if (/^(bw|bodyweight)$/i.test(s)) return { t: "bw" };
@@ -120,6 +121,7 @@
     if (l.t === "rir") return `${l.v} RIR`;
     if (l.t === "lb" || l.t === "kg") return `${r(l.v)} ${l.t}`;
     if (l.t === "bw") return "bodyweight";
+    if (l.t === "band") return `${l.v} band`;
     return "";
   }
   function groupText(g, units) {
@@ -248,6 +250,7 @@
        "95x5, 105x5, 115x3"        exactly these (a weight on its own means 5 reps)
        "bar x5, 50%x5, 75%x3"      "bar" is the empty bar; % is of the working weight
        "none"                      no warm-up sets */
+  const DEFAULT_BANDS = ["Yellow", "Red", "Black", "Purple", "Green", "Blue"]; // lightest to heaviest; the gym can change these
   const WARMUP_DEFAULT = { reps: [5, 5, 5, 5], heavyReps: [5, 5, 3, 2], heavyAt: 85 };
   const repList = (v, fb) => { const a = (Array.isArray(v) ? v : String(v || "").split(/[^0-9]+/)).map((x) => Math.round(+x)).filter((x) => x > 0 && x < 100).slice(0, 10); return a.length ? a : fb; };
   function warmupDefaultOf(d) {
@@ -297,7 +300,7 @@
   // **bold** in coach notes; everything else is escaped.
   const richText = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>");
 
-  const api = { pickProgram, textWarmup, dayActive, isOff, WARMUP_DEFAULT, warmupDefaultOf, parseWarmup, warmupPlan, moveKey, movedDate, parsePrescription, parseLoad, prescriptionText, groupText, loadText, formatText, compile, dayDate, mmss, WEEKDAYS, ceilTo, roundStep, est1RM, targetOf, pctOf, richText };
+  const api = { DEFAULT_BANDS, pickProgram, textWarmup, dayActive, isOff, WARMUP_DEFAULT, warmupDefaultOf, parseWarmup, warmupPlan, moveKey, movedDate, parsePrescription, parseLoad, prescriptionText, groupText, loadText, formatText, compile, dayDate, mmss, WEEKDAYS, ceilTo, roundStep, est1RM, targetOf, pctOf, richText };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   root.PPProgram = api;
 })(typeof window !== "undefined" ? window : globalThis);
