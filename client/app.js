@@ -2,7 +2,7 @@
    Data lives on the phone and syncs to the client's account in the gym's Supabase project (see "Account + sync"). */
 (() => {
 "use strict";
-const APP_VERSION = "0.8.3";
+const APP_VERSION = "0.8.4";
 const PP = window.PPProgram;
 const APP_NAME = "Power Plant";
 
@@ -255,7 +255,9 @@ const uid = (p = "w") => p + Date.now().toString(36) + Math.random().toString(36
 const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 40) || "x";
 const clone = (o) => JSON.parse(JSON.stringify(o));
 const lsGet = (k) => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } };
-const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } };
+// ?preview=1: a coach looking at a client's app from the dashboard. Nothing is saved or sent.
+const PREVIEW = /[?&]preview=1\b/.test(location.search);
+const lsSet = (k, v) => { if (PREVIEW) return true; try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } };
 const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 const e1rm = (w, r) => (w > 0 && r > 0 && r <= 12 ? w * (1 + r / 30) : 0);
 
@@ -305,6 +307,14 @@ const S = {
 };
 
 function load() {
+  if (PREVIEW) { // what the dashboard handed over: the client's program (with maxes) and their logged workouts
+    let pv = null; try { pv = JSON.parse(localStorage.getItem("ppc1.preview")); } catch {}
+    S.state = normalize({ units: (pv && pv.units) || "lb", rm5: (pv && pv.rm5) || {} });
+    S.workouts = (pv && pv.workouts) || []; S.days = {}; S.program = (pv && pv.program) || PPSample.program();
+    S.previewName = (pv && pv.name) || "this client";
+    document.body.insertAdjacentHTML("afterbegin", `<div class="preview-bar">Preview of <b>${esc(S.previewName)}</b>’s app. Try anything; nothing here is saved or sent. <button class="btn small" onclick="window.close()">Close</button></div>`);
+    return;
+  }
   S.state = normalize(lsGet("pp1.state"));
   S.workouts = lsGet("pp1.workouts") || [];
   S.days = lsGet("pp1.days") || {};
@@ -848,7 +858,7 @@ function renderWorkout() {
     : S.ui.confirm === "finish"
     ? `<div class="panel"><b>Finish with unchecked sets?</b><span class="sub">Unchecked working sets on exercises you started count as missed. Exercises with no checked sets are skipped.</span><div class="row end"><button class="btn ghost" data-act="confirm-no">Back</button><button class="btn primary" data-act="finish-yes">Finish</button></div></div>`
     : "";
-  return `${header(`In progress · <span id="elapsed" class="num">${mmss((Date.now() - Date.parse(a.startedAt)) / 1000)}</span>`, esc(a.name), `<span class="sync cloud" title="Every number you type is saved right away"><i></i>Saved on this phone</span>`)}
+  return `${header(`In progress · <span id="elapsed" class="num">${mmss((Date.now() - Date.parse(a.startedAt)) / 1000)}</span>`, esc(a.name), `${PREVIEW ? `<span class="sync cloud">Preview · not saved</span>` : `<span class="sync cloud" title="Every number you type is saved right away"><i></i>Saved on this phone</span>`}`)}
     ${coachChanged ? `<div class="msg action" style="align-self:stretch"><span class="grow">Your coach changed this workout after you started it.</span><button class="btn small primary" data-act="wk-refresh">Use the new version</button></div><p class="note">Exercises you’ve already ticked sets on keep what you logged.</p>` : ""}
     ${a.coachNote ? `<div class="coach-note">${PP.richText(a.coachNote)}</div>` : ""}${a.warmup ? `<div class="coach-note"><b>Warm-up:</b> ${PP.richText(a.warmup)}</div>` : ""}
     ${blocks.join("") || `<div class="empty">No exercises yet. Add your first one below.</div>`}
@@ -1771,5 +1781,5 @@ async function sendMessage() {
 /* ================= Boot ================= */
 load();
 route();
-startCloud();
+if (!PREVIEW) startCloud();
 })();

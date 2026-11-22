@@ -444,7 +444,7 @@ function renderClient(cid) {
           <select class="in" id="c-remote" data-c="${cid}" aria-label="Training"><option value="0">In person</option><option value="1" ${c.remote ? "selected" : ""}>Remote</option></select><span class="sub">${esc(c.email || "")}</span></div>`
       : `<div class="eyebrow">${c.remote ? "Remote" : "In person"} · Main coach: ${esc((db.coaches.find((x) => x.id === c.coachId) || {}).name || "–")}</div>`}<h1>${esc(c.name)}</h1></div></div>
     <div class="cols">
-      <section class="feed"><div class="row"><button class="btn small primary" data-act="sched-open" data-c="${cid}">+ Add workouts to calendar</button><div class="seg" role="tablist"><button role="tab" data-act="ctab" data-t="calendar" aria-selected="${tab === "calendar"}">Calendar</button><button role="tab" data-act="ctab" data-t="feed" aria-selected="${tab === "feed"}">Recent workouts</button>${db.cloud ? `<button role="tab" data-act="ctab" data-t="messages" aria-selected="${tab === "messages"}">Messages${unreadOf(cid) ? `<span class="nbadge">${unreadOf(cid)}</span>` : ""}</button>` : ""}</div></div>
+      <section class="feed"><div class="row"><button class="btn small primary" data-act="sched-open" data-c="${cid}">+ Add workouts to calendar</button><button class="btn small" data-act="preview-app" data-c="${cid}" title="Open their app as they see it, in a new tab">See their app</button><div class="seg" role="tablist"><button role="tab" data-act="ctab" data-t="calendar" aria-selected="${tab === "calendar"}">Calendar</button><button role="tab" data-act="ctab" data-t="feed" aria-selected="${tab === "feed"}">Recent workouts</button>${db.cloud ? `<button role="tab" data-act="ctab" data-t="messages" aria-selected="${tab === "messages"}">Messages${unreadOf(cid) ? `<span class="nbadge">${unreadOf(cid)}</span>` : ""}</button>` : ""}</div></div>
         ${tab === "messages" && db.cloud ? conversationHTML(cid) : tab === "calendar" ? calendarHTML(c) : logs.map((l) => logCardHTML(l)).join("") || `<div class="empty">${db.cloud ? `No workouts logged yet. Every workout ${esc(c.name)} finishes in the app shows up here with their notes.` : `No workouts logged yet. Once accounts are live, every workout ${esc(c.name)} finishes shows up here with their notes. Until then, load the file they send from the app (Profile → Send my workouts to my coach).`}</div>`}</section>
       <aside style="display:flex;flex-direction:column;gap:18px">
         ${maxesCardHTML(c)}
@@ -893,6 +893,21 @@ function sessionHTML(drag) {
     ${day.cooldown ? `<div class="cnote"><b>Cool-down:</b> ${P.richText(day.cooldown)}</div>` : ""}
     <div class="row sess-foot"><label class="f">Date<input class="in" type="date" id="mv-date" value="${date || ""}" data-drag="${esc(drag)}"></label><button class="btn" data-act="mv-save">Move to this date</button><button class="btn danger" data-act="mv-off">Remove from calendar</button><span class="grow"></span><a class="btn small ghost" href="#program-${p.id}" data-act="sess-prog" data-d="${p.days.indexOf(day)}" data-w="${w}" style="text-decoration:none">Open the whole program</a></div>`;
 }
+// Open the client app as this client sees it: the program their app would pick, their maxes and logged workouts.
+function previewApp(cid) {
+  const c = client(cid), today = todayISO(), progs = programsOf(cid);
+  const started = progs.filter((p) => !p.startDate || p.startDate <= today).sort((a, b) => (b.startDate || "").localeCompare(a.startDate || ""));
+  const upcoming = progs.filter((p) => p.startDate && p.startDate > today).sort((a, b) => a.startDate.localeCompare(b.startDate));
+  const pick = started[0] || upcoming[0] || null;
+  const maxes = {}; for (const [ex, m] of Object.entries(c.maxes || {})) { const o = {}; for (const k of ["rm5", "rm1", "target"]) if (m[k] > 0) o[k] = +m[k]; maxes[ex] = o; }
+  let program = null;
+  if (pick) { const used = new Set(pick.days.flatMap((d) => d.blocks.map((b) => b.ex))); program = { ...clone(pick), warmupDefault: db.warmupDefault, exercises: Object.fromEntries(Object.entries(db.custom).filter(([id]) => used.has(id))), maxes, sample: false, cloud: true }; delete program.clientId; delete program.template; }
+  const workouts = logsOf(cid).map((l) => { const w = { ...l }; delete w.clientId; return w; });
+  try { localStorage.setItem("ppc1.preview", JSON.stringify({ name: c.name, units: "lb", program, workouts })); } catch { toast("Couldn’t open the preview in this browser."); return; }
+  const win = window.open(new URL("../app/?preview=1#workout", location.href).href, "_blank");
+  if (!win) toast("Your browser blocked the new tab. Allow pop-ups for this site and try again.");
+  else if (!pick) toast(`${c.name} has no program yet, so their app shows the sample program.`);
+}
 function fixDatedStart(pr) { const ds = Object.values(pr.moves || {}).filter((v) => /^\d{4}-\d{2}-\d{2}$/.test(v)).sort(); if (ds.length) pr.startDate = ds[0]; }
 // Take one session off a client's calendar (and out of their app). Logged workouts are never touched.
 function removeSession(drag) {
@@ -986,6 +1001,7 @@ document.addEventListener("click", (ev) => {
     case "reset-sample": db = seed(); save(); UI.confirm = null; renderTop(); route(); toast("Sample data reset."); break;
     case "prog-new": { const np = newProgram(t.dataset.c); UI.day = 0; location.hash = "#program-" + np.id; break; }
     case "prog-dup": UI.confirm = "dup:" + t.dataset.id; route(); break;
+    case "preview-app": previewApp(t.dataset.c); break;
     case "sched-open": schedOpen(t.dataset.c, t.dataset.src); break;
     case "sc-day": { const k = t.dataset.k; if (t.checked) UI.sched.sel.add(k); else UI.sched.sel.delete(k); schedRedraw(); break; }
     case "sc-week": { const w = +t.dataset.w, p2 = prog(UI.sched.src); for (const day of p2.days) if (hasWorkout(p2, w, day)) { const k = w + ":" + day.id; if (t.checked) UI.sched.sel.add(k); else UI.sched.sel.delete(k); } schedRedraw(); break; }
