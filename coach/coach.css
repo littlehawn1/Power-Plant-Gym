@@ -231,3 +231,5 @@ table.maxt { width: 100%; border-collapse: collapse; font-size: 14px; }
 .sess-more summary { cursor: pointer; color: var(--muted, inherit); font-size: 14px; }
 .sess-more[open] summary { margin-bottom: 8px; }
 .ssr.ed .in.wide { width: 6.5em; }
+.pill.good { background: rgba(46,139,87,.18); color: #2e7d4f; }
+@media (prefers-color-scheme: dark) { .pill.good { color: #6fcf97; } }

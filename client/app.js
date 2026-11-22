@@ -2,7 +2,7 @@
    Data lives on the phone and syncs to the client's account in the gym's Supabase project (see "Account + sync"). */
 (() => {
 "use strict";
-const APP_VERSION = "0.8.4";
+const APP_VERSION = "0.8.5";
 const PP = window.PPProgram;
 const APP_NAME = "Power Plant";
 
@@ -1641,9 +1641,7 @@ async function pull() {
 
   // The coach's program: the latest one that has started, else the next one coming up. Maxes come with it.
   const today = todayISO(), progs = (pr.data || []).map((r) => ({ ...r.data, id: r.id, name: r.name || (r.data && r.data.name) || "Program", _at: r.updated_at }));
-  const started = progs.filter((p) => !p.startDate || p.startDate <= today).sort((a, b) => (b.startDate || "").localeCompare(a.startDate || "") || (b._at || "").localeCompare(a._at || ""));
-  const upcoming = progs.filter((p) => p.startDate && p.startDate > today).sort((a, b) => a.startDate.localeCompare(b.startDate));
-  const pick = started[0] || upcoming[0] || null;
+  const pick = PP.pickProgram(progs, today); // the same choice the coach's dashboard shows
   const maxes = {};
   for (const m of mx.data || []) { const o = {}; for (const k of ["rm5", "rm1", "target"]) if (m[k] != null && +m[k] > 0) o[k] = +m[k]; maxes[m.ex] = o; }
   if (pick) { delete pick._at; S.program = { ...pick, maxes, sample: false, cloud: true }; lsSet("pp1.program", S.program); }

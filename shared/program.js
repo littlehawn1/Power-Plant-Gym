@@ -191,6 +191,23 @@
     const n = +m[1], r = +m[2], i = (groups || []).findIndex((g) => g.sets === n && g.reps === r && !g.load);
     return { groups: i < 0 ? groups : groups.filter((_, k) => k !== i), warmup: `${n} sets of ${r}` };
   }
+  // Which of a client's programs their app shows (the app runs one at a time). Shared by the app and the dashboard so
+  // the coach's preview matches the phone. Programs with no workouts are skipped. Then: a program that has started and
+  // still has workouts on or after today (newest start first), else the next one coming up, else the latest finished.
+  // list items are programs with an optional _at (last saved) used to break ties.
+  function pickProgram(list, today) {
+    const info = (list || []).map((p) => {
+      const cp = p && p.v === 2 ? compile(p) : p, days = cp && Array.isArray(cp.weeks) ? cp.weeks.flatMap((w) => w.days || []) : [];
+      const dates = days.map((d) => d.date).filter(Boolean).sort();
+      return { p, n: days.length, start: p.startDate || dates[0] || "", last: dates[dates.length - 1] || "" };
+    }).filter((x) => x.n);
+    const newest = (a, b) => b.start.localeCompare(a.start) || String(b.p._at || "").localeCompare(String(a.p._at || ""));
+    const started = info.filter((x) => !x.start || x.start <= today);
+    const live = started.filter((x) => !x.last || x.last >= today).sort(newest);
+    const upcoming = info.filter((x) => x.start && x.start > today).sort((a, b) => a.start.localeCompare(b.start) || String(b.p._at || "").localeCompare(String(a.p._at || "")));
+    const pick = live[0] || upcoming[0] || started.sort(newest)[0];
+    return pick ? pick.p : null;
+  }
   // A day counts as a workout in a week only if it has exercises that week. Warm-up or cool-down text alone counts
   // only for a day with no exercises at all (a mobility day); otherwise imported days showed up empty every week.
   // Turns a coach program (v2) into the week-by-week list the client app runs.
@@ -280,7 +297,7 @@
   // **bold** in coach notes; everything else is escaped.
   const richText = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>");
 
-  const api = { textWarmup, dayActive, isOff, WARMUP_DEFAULT, warmupDefaultOf, parseWarmup, warmupPlan, moveKey, movedDate, parsePrescription, parseLoad, prescriptionText, groupText, loadText, formatText, compile, dayDate, mmss, WEEKDAYS, ceilTo, roundStep, est1RM, targetOf, pctOf, richText };
+  const api = { pickProgram, textWarmup, dayActive, isOff, WARMUP_DEFAULT, warmupDefaultOf, parseWarmup, warmupPlan, moveKey, movedDate, parsePrescription, parseLoad, prescriptionText, groupText, loadText, formatText, compile, dayDate, mmss, WEEKDAYS, ceilTo, roundStep, est1RM, targetOf, pctOf, richText };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   root.PPProgram = api;
 })(typeof window !== "undefined" ? window : globalThis);

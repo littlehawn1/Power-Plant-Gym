@@ -79,7 +79,7 @@ async function loadCloud() {
   for (const n of cn.data) { const k = cl(n.client_id); if (k) k.notes = n.note || ""; }
   for (const m of mx.data) { const k = cl(m.client_id); if (!k) continue; const o = {}; for (const f of ["rm5", "rm1", "target"]) if (m[f] != null && +m[f] > 0) o[f] = +m[f]; if (m.pending) o.pending = m.pending; k.maxes[m.ex] = o; }
   const rows = [...pr.data].sort((a, b) => ((a.data && a.data.startDate) || "").localeCompare((b.data && b.data.startDate) || "") || (a.updated_at || "").localeCompare(b.updated_at || ""));
-  for (const r of rows) { const p = { ...(r.data || {}) }; delete p.exercises; delete p.maxes; p.id = r.id; p.clientId = r.client_id; p.template = !r.client_id; p.name = p.name || r.name || "Program"; d.programs.push(p); }
+  for (const r of rows) { const p = { ...(r.data || {}) }; delete p.exercises; delete p.maxes; p._at = r.updated_at || ""; p.id = r.id; p.clientId = r.client_id; p.template = !r.client_id; p.name = p.name || r.name || "Program"; d.programs.push(p); }
   for (const r of wo.data) d.logs.push({ ...(r.data || {}), id: r.id, clientId: r.client_id });
   for (const n of dn.data) (d.dayNotes[n.client_id] = d.dayNotes[n.client_id] || {})[n.day] = n.note;
   const s = (gs.data.find((x) => x.key === "coach") || {}).data || {};
@@ -98,7 +98,7 @@ function rowsOf(d) {
   for (const p of d.programs) {
     const used = new Set((p.days || []).flatMap((x) => (x.blocks || []).map((b) => b.ex)));
     const data = { ...p, warmupDefault: d.warmupDefault, exercises: Object.fromEntries(Object.entries(d.custom || {}).filter(([id]) => used.has(id))) };
-    delete data.clientId; delete data.template;
+    delete data.clientId; delete data.template; delete data._at;
     out.prog[p.id] = { id: p.id, client_id: p.template ? null : p.clientId || null, name: p.name || "", data };
   }
   for (const [cid, days] of Object.entries(d.dayNotes || {})) for (const [day, note] of Object.entries(days)) if (note) out.day[cid + "|" + day] = { client_id: cid, day, note };
@@ -432,7 +432,8 @@ function calendarHTML(c) {
 function renderClient(cid) {
   setNav("clients");
   const c = client(cid), logs = logsOf(cid), tab = UI.clientTab || "calendar";
-  const progs = programsOf(cid).map((p) => `<div class="pitem"><div class="grow"><b>${esc(p.name)}</b><div class="sub">${p.weeks} weeks · ${p.days.length} days/week · ${p.schedule === "dated" ? "on picked dates" : p.schedule === "weekly" ? "scheduled by day" : "any order"} · ${esc(programWeekNow(p) || "")}</div></div>
+  const inApp = appProgram(cid), nProg = programsOf(cid).length;
+  const progs = programsOf(cid).map((p) => `<div class="pitem"><div class="grow"><b>${esc(p.name)}</b>${inApp && inApp.id === p.id ? ` <span class="pill good" title="Their app shows one program at a time">In their app</span>` : nProg > 1 ? ` <span class="pill" title="Their app shows one program at a time; this one isn’t it right now">Not in their app now</span>` : ""}<div class="sub">${p.weeks} weeks · ${p.days.length} days/week · ${p.schedule === "dated" ? "on picked dates" : p.schedule === "weekly" ? "scheduled by day" : "any order"} · ${esc(programWeekNow(p) || "")}</div></div>
       <a class="btn small primary" href="#program-${p.id}" style="text-decoration:none">Edit</a><button class="btn small" data-act="prog-dup" data-id="${p.id}">Copy…</button><button class="btn small ghost" data-act="prog-rm" data-id="${p.id}">Remove</button></div>
       ${UI.confirm === "rm:" + p.id ? `<div class="panel" style="background:var(--sunken)"><b>Remove “${esc(p.name)}” from ${esc(c.name)}?</b><div class="sub">Its workouts come off their calendar and app. Workouts they already logged stay.</div><div class="row"><button class="btn small danger" data-act="prog-rm-yes" data-id="${p.id}">Remove</button><button class="btn small ghost" data-act="cancel">Cancel</button></div></div>` : ""}`).join("");
   const dup = UI.confirm && UI.confirm.startsWith("dup:") ? db.programs.find((p) => p.id === UI.confirm.slice(4)) : null;
@@ -894,14 +895,13 @@ function sessionHTML(drag) {
     <div class="row sess-foot"><label class="f">Date<input class="in" type="date" id="mv-date" value="${date || ""}" data-drag="${esc(drag)}"></label><button class="btn" data-act="mv-save">Move to this date</button><button class="btn danger" data-act="mv-off">Remove from calendar</button><span class="grow"></span><a class="btn small ghost" href="#program-${p.id}" data-act="sess-prog" data-d="${p.days.indexOf(day)}" data-w="${w}" style="text-decoration:none">Open the whole program</a></div>`;
 }
 // Open the client app as this client sees it: the program their app would pick, their maxes and logged workouts.
+const appProgram = (cid) => P.pickProgram(programsOf(cid), todayISO()); // the program the client's app shows
 function previewApp(cid) {
   const c = client(cid), today = todayISO(), progs = programsOf(cid);
-  const started = progs.filter((p) => !p.startDate || p.startDate <= today).sort((a, b) => (b.startDate || "").localeCompare(a.startDate || ""));
-  const upcoming = progs.filter((p) => p.startDate && p.startDate > today).sort((a, b) => a.startDate.localeCompare(b.startDate));
-  const pick = started[0] || upcoming[0] || null;
+  const pick = appProgram(cid);
   const maxes = {}; for (const [ex, m] of Object.entries(c.maxes || {})) { const o = {}; for (const k of ["rm5", "rm1", "target"]) if (m[k] > 0) o[k] = +m[k]; maxes[ex] = o; }
   let program = null;
-  if (pick) { const used = new Set(pick.days.flatMap((d) => d.blocks.map((b) => b.ex))); program = { ...clone(pick), warmupDefault: db.warmupDefault, exercises: Object.fromEntries(Object.entries(db.custom).filter(([id]) => used.has(id))), maxes, sample: false, cloud: true }; delete program.clientId; delete program.template; }
+  if (pick) { const used = new Set(pick.days.flatMap((d) => d.blocks.map((b) => b.ex))); program = { ...clone(pick), _at: undefined, warmupDefault: db.warmupDefault, exercises: Object.fromEntries(Object.entries(db.custom).filter(([id]) => used.has(id))), maxes, sample: false, cloud: true }; delete program.clientId; delete program.template; }
   const workouts = logsOf(cid).map((l) => { const w = { ...l }; delete w.clientId; return w; });
   try { localStorage.setItem("ppc1.preview", JSON.stringify({ name: c.name, units: "lb", program, workouts })); } catch { toast("Couldn’t open the preview in this browser."); return; }
   const win = window.open(new URL("../app/?preview=1#workout", location.href).href, "_blank");
