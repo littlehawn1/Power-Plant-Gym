@@ -775,27 +775,54 @@ function moveSession(drag, date) {
 }
 /* ---- One scheduled workout: the exact sets and weights this client will get, editable for that day ---- */
 const BAR = 45;
-function setsFor(text, ex, c, b, p) {
+// Text for one load or rep target, written the way the program cells are typed (so it reads back the same).
+const loadTok = (L) => !L ? "" : L.t === "pct" ? `${L.v}%` : L.t === "lb" ? `${L.v}` : L.t === "kg" ? `${L.v} kg` : L.t === "top" ? `${L.v}% of todays top` : L.t === "rpe" ? `RPE ${L.v}` : L.t === "rir" ? `RIR ${L.v}` : L.t === "bw" ? "bw" : "";
+const repTok = (g) => (g.amrap && !g.reps ? "AMRAP" : g.amrap ? `${g.reps}+` : g.repsMax ? `${g.reps}-${g.repsMax}` : `${g.reps}`) + (g.per ? `/${g.per}` : "");
+function setsFor(text, ex, c, b, p, bi) {
   const t = String(text || "").trim();
   if (!t) return `<div class="ss sub">Nothing for this exercise this day.</div>`;
   if (/^(skip|off|none|n\/a|-+|—)$/i.test(t)) return `<div class="ss sub">Skipped this day.</div>`;
   const r = P.parsePrescription(t), max = c && c.maxes && c.maxes[ex] ? P.targetOf(c.maxes[ex], UNITS) : 0;
+  // Sets can be edited number by number when the line is plain sets × reps (not timed, a build-up, or free text).
+  const editable = bi != null && r.groups.length && !r.errors.length && !r.loose && r.groups.every((g) => !g.time && !g.dist && !g.capped && !g.build && (g.reps || g.amrap));
   const rows = []; let n = 0, top = 0, missingMax = false;
   for (const g of r.groups) {
     const reps = g.capped ? `AMRAP in ${mmss(g.time)}` : g.time ? mmss(g.time) : g.dist ? `${g.dist} ${g.distUnit || ""}` : g.amrap ? (g.reps ? `${g.reps}+ reps` : "as many reps as possible") : `${g.reps}${g.repsMax ? "–" + g.repsMax : ""} rep${g.reps === 1 && !g.repsMax ? "" : "s"}`;
-    let wt = "", L = g.load;
-    if (L && L.t === "pct") { if (max) { const w = P.pctOf(max, L.v, UNITS); wt = `<b>${w} lb</b> <span class="sub">(${L.v}% of ${max})</span>`; top = Math.max(top, w); } else { wt = `${L.v}% <span class="flagtxt">— no max set</span>`; missingMax = true; } }
-    else if (L && (L.t === "lb" || L.t === "kg")) { wt = `<b>${L.v} ${L.t}</b>`; top = Math.max(top, L.t === "lb" ? L.v : 0); }
-    else if (L && L.t === "top") wt = `${L.v}% of the day’s top set`;
-    else if (L && L.t === "rpe") wt = `RPE ${L.v}`;
-    else if (L && L.t === "bw") wt = "bodyweight";
-    else if (L) wt = esc(P.loadText(L, UNITS) || "");
+    let wt = "", calc = "", hint = "", L = g.load;
+    if (L && L.t === "pct") { if (max) { const w = P.pctOf(max, L.v, UNITS); calc = w; wt = `<b>${w} lb</b> <span class="sub">(${L.v}% of ${max})</span>`; hint = `${L.v}% of ${max}`; top = Math.max(top, w); } else { wt = `${L.v}% <span class="flagtxt">— no max set</span>`; hint = `${L.v}% · no max`; missingMax = true; } }
+    else if (L && (L.t === "lb" || L.t === "kg")) { calc = L.v; wt = `<b>${L.v} ${L.t}</b>`; top = Math.max(top, L.t === "lb" ? L.v : 0); hint = max && L.t === "lb" ? `${Math.round((L.v / max) * 100)}% of ${max}` : ""; }
+    else if (L && L.t === "top") { wt = `${L.v}% of the day’s top set`; hint = wt; }
+    else if (L && L.t === "rpe") { wt = `RPE ${L.v}`; hint = wt; }
+    else if (L && L.t === "bw") { wt = "bodyweight"; hint = wt; }
+    else if (L) { wt = esc(P.loadText(L, UNITS) || ""); hint = wt; }
     if (g.build) wt = `build to a heavy ${g.reps === 1 ? "single" : g.reps === 2 ? "double" : g.reps === 3 ? "triple" : g.reps + "-rep set"}`;
-    for (let i = 0; i < (g.sets || 1); i++) rows.push(`<div class="ssr"><span class="sub num">Set ${++n}</span><span>${reps}${g.per ? " each " + esc(g.per) : ""}</span><span>${wt}</span></div>`);
+    for (let i = 0; i < (g.sets || 1); i++) {
+      n++;
+      rows.push(editable
+        ? `<div class="ssr ed" data-row="${bi}" data-load="${esc(loadTok(L))}" data-calc="${calc}" data-label="${i === 0 && g.label ? esc(g.label) : ""}"><span class="sub num">Set ${n}</span>
+            <span><input class="in num ss-in" data-ss="r" value="${esc(repTok(g))}" aria-label="Set ${n} reps" size="4"> reps</span>
+            <span><input class="in num ss-in" data-ss="w" inputmode="decimal" value="${calc}" placeholder="${esc(L && !calc ? (L.t === "rpe" ? "RPE " + L.v : L.t === "top" ? L.v + "% top" : L.t === "pct" ? L.v + "%" : "") : "weight")}" aria-label="Set ${n} weight" size="5"> lb ${hint ? `<span class="sub">${esc(hint)}</span>` : ""}${i === 0 && g.label ? ` <span class="sub">(${esc(g.label)})</span>` : ""}</span></div>`
+        : `<div class="ssr"><span class="sub num">Set ${n}</span><span>${reps}${g.per ? " each " + esc(g.per) : ""}</span><span>${wt}</span></div>`);
+    }
   }
   const wu = b && (b.warmupSets || (b.warmup && !/^\s*(none|no|off|skip)\s*$/i.test(b.warmup))) && top ? P.warmupPlan({ work: top, bar: BAR, max, step: 5, def: db.warmupDefault, custom: b.warmup }) : [];
-  const head = r.errors.length || r.loose ? `<div class="sub">Shown to the client as written. Rows below are what the app sets up to log.</div>` : "";
+  const head = r.errors.length || r.loose ? `<div class="sub">Shown to the client as written. Rows below are what the app sets up to log. Change the line above to change them.</div>` : editable ? `<div class="sub">Change any set’s reps or weight. A weight you type replaces the % for that set; ${max ? "the % of their max shows beside it." : "add their max to see the %."}</div>` : "";
   return `<div class="ss">${head}${wu.length ? `<div class="ssr wu"><span class="sub">Warm-up</span><span class="num">${esc(wu.map((x) => `${x.w}×${x.r}`).join(", "))}</span><span class="sub">${BAR} lb bar</span></div>` : ""}${rows.join("") || `<div class="sub">Logs 1 set.</div>`}${missingMax ? `<div class="flagtxt">Add their max for this lift (Maxes, on their page) so the app can work out the weight.</div>` : ""}</div>`;
+}
+// Turn the edited set rows back into a program line, e.g. "1x3 @ 200 (top set), 3x4 @ 75%, tempo 3010".
+function rowsToLine(bi, oldText) {
+  const r = P.parsePrescription(oldText || ""), parts = [];
+  for (const row of document.querySelectorAll(`.ssr.ed[data-row="${bi}"]`)) {
+    const rIn = row.querySelector('[data-ss="r"]').value.trim(), wIn = row.querySelector('[data-ss="w"]').value.trim();
+    const reps = /^(\d+(\+|\s*-\s*\d+)?|amrap)(\/\w+)?$/i.test(rIn) ? rIn.replace(/\s+/g, "") : "1";
+    const load = wIn && isFinite(+wIn) && +wIn > 0 && String(+wIn) !== row.dataset.calc ? String(+wIn) : row.dataset.load; // blank or unchanged keeps the program's %, RPE…
+    const last = parts[parts.length - 1], label = row.dataset.label;
+    if (last && last.reps === reps && last.load === load && !label) last.n++;
+    else parts.push({ n: 1, reps, load, label });
+  }
+  const line = parts.map((x) => `${x.n}x${x.reps}${x.load ? " @ " + x.load : ""}${x.label ? ` (${x.label})` : ""}`);
+  if (r.tempo) line.push(`tempo ${r.tempo}`); if (r.pause) line.push(`pause ${r.pause}`);
+  return line.join(", ");
 }
 function sessionHTML(drag) {
   const [pid, ws, did] = drag.split("|"), w = +ws, p = prog(pid), day = p && p.days.find((x) => x.id === did); if (!day) return "";
@@ -805,7 +832,7 @@ function sessionHTML(drag) {
     const cell = (b.weeks || [])[w] || "", m = exMeta(b.ex), lab = labels[bi];
     return `<div class="sess-ex${cell.trim() ? "" : " off"}"><div class="row"><b class="grow">${lab ? `<span class="glabel">${esc(lab.label)}</span> ` : ""}${esc(m.name)}</b>${b.rest ? `<span class="sub">rest ${mmss(b.rest)}</span>` : ""}</div>
       <input class="in" data-sess="${bi}" value="${esc(cell)}" placeholder="e.g. 3x5 @80% · 4x8 @135 · 3x10 @RPE8 · blank = not this day">
-      <div id="ss-${bi}">${setsFor(cell, b.ex, c, b, p)}</div></div>`;
+      <div id="ss-${bi}">${setsFor(cell, b.ex, c, b, p, bi)}</div></div>`;
   }).join("");
   return `<div class="row"><div class="grow"><div class="eyebrow">${esc(c ? c.name : "")}${date ? " · " + esc(dateLabel(date)) : ""}</div><h2>Week ${w + 1} · ${esc(day.name || "Workout")}</h2></div><button class="btn small ghost" data-act="modal-close">Done</button></div>
     <p class="sub">What ${esc(c ? c.name : "the client")} will see, with weights worked out from their maxes. Change any line and it updates for <b>this day only</b> (week ${w + 1} of “${esc(p.name)}”). Changes save as you type.</p>
@@ -1034,7 +1061,7 @@ document.addEventListener("input", (ev) => {
   if (t.dataset.sess != null && UI.sess) { // edit one exercise for one scheduled day
     const [pid, ws, did] = UI.sess.split("|"), p2 = prog(pid), day2 = p2 && p2.days.find((x) => x.id === did), b = day2 && day2.blocks[+t.dataset.sess]; if (!b) return;
     b.weeks = b.weeks || []; while (b.weeks.length < p2.weeks) b.weeks.push(""); b.weeks[+ws] = t.value; save();
-    const box = $("#ss-" + t.dataset.sess); if (box) box.innerHTML = setsFor(t.value, b.ex, client(p2.clientId), b, p2);
+    const box = $("#ss-" + t.dataset.sess); if (box) box.innerHTML = setsFor(t.value, b.ex, client(p2.clientId), b, p2, +t.dataset.sess);
     t.closest(".sess-ex").classList.toggle("off", !t.value.trim()); return;
   }
   if (t.id === "ex-q") { UI.exQ = t.value; $("#ex-list").innerHTML = exListHTML(); return; }
@@ -1055,6 +1082,13 @@ document.addEventListener("change", (ev) => {
   const t = ev.target, p = cur() ? prog(cur()) : null;
   if (t.id === "me") { if (db.cloud) return; db.me = t.value; save(); route(); return; }
   if (t.id === "sc-src" && UI.sched) { UI.sched.src = t.value; UI.sched.sel = new Set(); const p2 = prog(t.value), wds = [...new Set(p2.days.map((d) => d.weekday).filter((x) => x != null))]; if (wds.length) UI.sched.wds = wds; schedRedraw(); return; }
+  if (t.classList && t.classList.contains("ss-in") && UI.sess) {
+    const row = t.closest(".ssr.ed"), bi = +row.dataset.row, [pid, ws, did] = UI.sess.split("|"), p2 = prog(pid), day2 = p2 && p2.days.find((x) => x.id === did), b = day2 && day2.blocks[bi]; if (!b) return;
+    const line = rowsToLine(bi, (b.weeks || [])[+ws]); b.weeks = b.weeks || []; while (b.weeks.length < p2.weeks) b.weeks.push(""); b.weeks[+ws] = line; save();
+    const inp = document.querySelector(`[data-sess="${bi}"]`); if (inp) inp.value = line;
+    const box = $("#ss-" + bi); if (box) box.innerHTML = setsFor(line, b.ex, client(p2.clientId), b, p2, bi);
+    return;
+  }
   if (t.id === "sc-client" && UI.sched) { UI.sched.cid = t.value; schedRedraw(); return; }
   if (t.id === "sc-start" && UI.sched) { UI.sched.start = t.value; schedRedraw(); return; }
   if (t.classList && t.classList.contains("sc-wd") && UI.sched) { UI.sched.wds = [...document.querySelectorAll(".sc-wd:checked")].map((x) => +x.value); schedRedraw(); return; }

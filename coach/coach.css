@@ -218,3 +218,5 @@ table.maxt { width: 100%; border-collapse: collapse; font-size: 14px; }
 .ssr.wu { border-bottom: 1px dashed var(--line); padding-bottom: 4px; margin-bottom: 2px; }
 .flagtxt { color: var(--bad); font-size: 13px; }
 .sess-foot { align-items: flex-end; flex-wrap: wrap; gap: 8px; border-top: 1px solid var(--line); padding-top: 10px; }
+.ssr.ed { align-items: center; }
+.ssr.ed .in { width: 4.5em; padding: 4px 6px; display: inline-block; }
