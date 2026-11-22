@@ -91,6 +91,15 @@
       if (label) g.label = label;
       out.groups.push(g);
     }
+    // Free text with sets tucked inside sentences ("Think Lil Jon. Warm up: 4x5. 3 x 5-7 @65%."): pull those out.
+    if (!out.groups.length && out.errors.length) {
+      const re = /(\d+)\s*[x×]\s*(\d+\s*[-–]\s*\d+|\d+\s*\+|\d+)(?![a-z0-9:])(?:\s*@\s*([0-9][0-9.]*\s*%?(?:\s*(?:lbs?|kg))?|rpe\s*\d+(?:\.\d+)?))?/gi;
+      let m; while ((m = re.exec(out.raw))) {
+        const t = parseTarget(m[2].replace(/\s+/g, "")), L = m[3] ? parseLoad(m[3]) : null;
+        if (t && +m[1] > 0 && +m[1] <= 20 && L !== undefined) out.groups.push({ sets: +m[1], ...t, ...(L ? { load: L } : {}) });
+      }
+      if (out.groups.length) out.loose = true;
+    }
     return out;
   }
   const mmss = (s) => { s = Math.round(s || 0); const m = Math.floor(s / 60), r = s % 60; return m ? `${m}:${String(r).padStart(2, "0")}` : `${r}s`; };
@@ -165,6 +174,14 @@
     const m = program && program.moves; if (!m || (program.schedule !== "weekly" && program.schedule !== "dated")) return null;
     const v = m[moveKey(w, day)]; return typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null;
   }
+  // "Warm up: 4x5" inside a coach's text: those are warm-up sets (worked out up to the working weight), so they come
+  // out of the working sets. Returns { groups, warmup } or null.
+  function textWarmup(text, groups) {
+    const m = String(text || "").match(/warm\s*-?\s*ups?\s*[:\-–]?\s*(\d+)\s*(?:x|×|sets?\s*of)\s*(\d+)/i);
+    if (!m) return null;
+    const n = +m[1], r = +m[2], i = (groups || []).findIndex((g) => g.sets === n && g.reps === r && !g.load);
+    return { groups: i < 0 ? groups : groups.filter((_, k) => k !== i), warmup: `${n} sets of ${r}` };
+  }
   // A day counts as a workout in a week only if it has exercises that week. Warm-up or cool-down text alone counts
   // only for a day with no exercises at all (a mobility day); otherwise imported days showed up empty every week.
   // Turns a coach program (v2) into the week-by-week list the client app runs.
@@ -182,7 +199,8 @@
           // A coach can set the exact sets for one day (b.rows[w]) and its warm-up (b.wu[w]) from the calendar.
           // The client still reads the coach's text; the app logs these sets and warm-ups.
           const rowsTxt = String((b.rows || [])[w] || "").trim(), rr = rowsTxt ? parsePrescription(rowsTxt) : null, lg = rr && rr.groups.length ? rr : rx;
-          const wuTxt = String((b.wu || [])[w] || "").trim();
+          const tw = !rr && (rx.errors.length || rx.loose) ? textWarmup(cell, rx.groups) : null; if (tw) lg.groups = tw.groups; // lg is rx here
+          const wuTxt = String((b.wu || [])[w] || "").trim() || (tw ? tw.warmup : "");
           return { ex: b.ex, warmup: wuTxt || b.warmup || "", text: rx.errors.length || rx.loose ? cell.trim() : "", groups: lg.groups, tempo: rx.tempo, pause: rx.pause, rest: b.rest || 0, note: [b.note, wn].filter(Boolean).join(" "), group: b.group || null, video: b.video || "", fields: b.fields || null, format: b.format || null, warmupSets: wuTxt ? !/^(none|no|off|skip)$/i.test(wuTxt) : !!b.warmupSets, sets: lg.groups.reduce((n, g) => n + g.sets, 0) };
         }).filter(Boolean),
       })).filter((d, i) => (d.items.length || (!(program.days[i].blocks || []).length && (d.warmup || d.cooldown))) && (program.schedule !== "dated" || d.date) && !d.off); // a "dated" program only runs the workouts put on the calendar
@@ -217,6 +235,8 @@
     if (/^(none|no|off|skip|-+)$/.test(t)) return { kind: "none" };
     let m = t.match(/^(?:start(?:ing)?|from)\s*(?:at\s*)?(\d+(?:\.\d+)?)$/);
     if (m) return { kind: "start", start: +m[1] };
+    m = t.match(/^(\d+)\s*sets?\s*of\s*(\d+)$/);
+    if (m && +m[1] > 0 && +m[1] <= 10) return { kind: "reps", reps: Array(+m[1]).fill(+m[2] || 5) };
     const steps = [];
     for (const part of t.split(/[,;\n]+|\s+then\s+/).map((x) => x.trim()).filter(Boolean)) {
       m = part.match(/^(bar|empty bar|\d+(?:\.\d+)?\s*%|\d+(?:\.\d+)?)\s*(?:(?:x|×|\*|for)\s*(\d+))?(?:\s*reps?)?$/);
@@ -240,7 +260,7 @@
     if (!(work > 0)) return [];
     const start = c && c.kind === "start" ? c.start : bar;
     if (!(work > start)) return [];
-    const reps = max > 0 && work >= (max * d.heavyAt) / 100 ? d.heavyReps : d.reps, n = reps.length;
+    const reps = c && c.kind === "reps" ? c.reps : max > 0 && work >= (max * d.heavyAt) / 100 ? d.heavyReps : d.reps, n = reps.length;
     for (let i = 0; i < n; i++) add(i === 0 ? start : fit(start + ((work - start) * i) / n), reps[i]);
     return out;
   }
@@ -251,7 +271,7 @@
   // **bold** in coach notes; everything else is escaped.
   const richText = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>");
 
-  const api = { dayActive, isOff, WARMUP_DEFAULT, warmupDefaultOf, parseWarmup, warmupPlan, moveKey, movedDate, parsePrescription, parseLoad, prescriptionText, groupText, loadText, formatText, compile, dayDate, mmss, WEEKDAYS, ceilTo, roundStep, est1RM, targetOf, pctOf, richText };
+  const api = { textWarmup, dayActive, isOff, WARMUP_DEFAULT, warmupDefaultOf, parseWarmup, warmupPlan, moveKey, movedDate, parsePrescription, parseLoad, prescriptionText, groupText, loadText, formatText, compile, dayDate, mmss, WEEKDAYS, ceilTo, roundStep, est1RM, targetOf, pctOf, richText };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   root.PPProgram = api;
 })(typeof window !== "undefined" ? window : globalThis);

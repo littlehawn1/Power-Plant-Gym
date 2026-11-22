@@ -784,7 +784,8 @@ function setsFor(text, ex, c, b, p, bi) {
   if (!t) return `<div class="ss sub">Nothing for this exercise this day.</div>`;
   if (SKIPC.test(t)) return `<div class="ss sub">Skipped this day.</div>`;
   const tr = P.parsePrescription(t), rowsTxt = bi != null ? String((b.rows || [])[w] || "").trim() : "";
-  const r = rowsTxt ? P.parsePrescription(rowsTxt) : tr, asText = tr.errors.length || tr.loose || !tr.groups.length;
+  const asText = tr.errors.length || tr.loose || !tr.groups.length, tw = !rowsTxt && asText ? P.textWarmup(t, tr.groups) : null; // "Warm up: 4x5" in the text
+  const r = rowsTxt ? P.parsePrescription(rowsTxt) : tw ? { ...tr, groups: tw.groups } : tr;
   const max = c && c.maxes && c.maxes[ex] ? P.targetOf(c.maxes[ex], UNITS) : 0;
   const editable = bi != null && r.groups.every((g) => !g.time && !g.dist && !g.capped && !g.build);
   const rows = []; let n = 0, top = 0, missingMax = false;
@@ -811,9 +812,9 @@ function setsFor(text, ex, c, b, p, bi) {
   // Warm-up: this day's own list if a coach set one, else the lift's setting / gym default.
   let wuHTML = "";
   if (bi != null && editable) {
-    const dayWu = String((b.wu || [])[w] || "").trim(), on = dayWu ? !NOWU.test(dayWu) : !!(b.warmupSets || (b.warmup && !NOWU.test(b.warmup)));
-    const plan = on && top ? P.warmupPlan({ work: top, bar: BAR, max, step: 5, def: db.warmupDefault, custom: dayWu || b.warmup }) : on && dayWu ? P.warmupPlan({ work: 0, custom: dayWu }) : [];
-    wuHTML = `<div class="wu-box"><div class="row"><label class="sub" style="display:flex;gap:6px;align-items:center"><input type="checkbox" class="wu-on" data-row="${bi}" ${on ? "checked" : ""}> <b>Warm-up sets</b></label><span class="grow"></span>${dayWu ? `<button class="btn small ghost" data-act="wu-auto" data-row="${bi}">Back to automatic</button>` : on ? `<span class="sub">automatic, from ${top ? top + " lb" : "the working weight"} (${BAR} lb bar)</span>` : ""}</div>
+    const ownWu = String((b.wu || [])[w] || "").trim(), dayWu = ownWu || (tw ? tw.warmup : ""), on = dayWu ? !NOWU.test(dayWu) : !!(b.warmupSets || (b.warmup && !NOWU.test(b.warmup)));
+    const plan = on && top ? P.warmupPlan({ work: top, bar: BAR, max, step: 5, def: db.warmupDefault, custom: dayWu || b.warmup }) : on && ownWu ? P.warmupPlan({ work: 0, custom: ownWu }) : [];
+    wuHTML = `<div class="wu-box"><div class="row"><label class="sub" style="display:flex;gap:6px;align-items:center"><input type="checkbox" class="wu-on" data-row="${bi}" ${on ? "checked" : ""}> <b>Warm-up sets</b></label><span class="grow"></span>${ownWu ? `<button class="btn small ghost" data-act="wu-auto" data-row="${bi}">Back to automatic</button>` : on ? `<span class="sub">${tw ? `from your text (${esc(tw.warmup)}), ` : "automatic, "}up to ${top ? top + " lb" : "the working weight"} · ${BAR} lb bar</span>` : ""}</div>
       ${on ? plan.map((x, k) => `<div class="ssr wu ed-wu" data-row="${bi}"><span class="sub num">W${k + 1}</span><span><input class="in num wu-in" data-wu="r" value="${x.r}" size="4"> reps</span><span><input class="in num wu-in" data-wu="w" inputmode="decimal" value="${x.w}" size="5"> lb${max ? ` <span class="sub">${Math.round((x.w / max) * 100)}%</span>` : ""}</span><button class="icon ss-x" data-act="wu-del" title="Remove this warm-up set">×</button></div>`).join("") + `<button class="btn small ghost" data-act="wu-add" data-row="${bi}">+ Warm-up set</button>${!plan.length && !top ? `<span class="sub"> Needs a working weight to work them out.</span>` : ""}` : ""}</div>`;
   } else if (bi == null || !editable) {
     const wu = b && (b.warmupSets || (b.warmup && !NOWU.test(b.warmup))) && top ? P.warmupPlan({ work: top, bar: BAR, max, step: 5, def: db.warmupDefault, custom: b.warmup }) : [];
@@ -1126,7 +1127,7 @@ document.addEventListener("change", (ev) => {
   if (t.classList && t.classList.contains("ss-in") && UI.sess) { sessSaveSets(+t.closest(".ssr").dataset.row); return; }
   if (t.classList && t.classList.contains("wu-in") && UI.sess) { const bi = +t.closest(".ssr").dataset.row; sessSaveWu(bi, wuToLine(bi)); return; }
   if (t.classList && t.classList.contains("wu-on") && UI.sess) { const bi = +t.dataset.row, { b } = sessBlock(bi);
-    if (!t.checked) sessSaveWu(bi, "none"); else if (b.warmupSets || (b.warmup && !NOWU.test(b.warmup))) sessSaveWu(bi, null); else { // switch on for this day: start from the gym's automatic warm-up for the heaviest set
+    if (!t.checked) sessSaveWu(bi, "none"); else if (b.warmupSets || (b.warmup && !NOWU.test(b.warmup)) || P.textWarmup((b.weeks || [])[sessBlock(bi).w], [])) sessSaveWu(bi, null); else { // switch on for this day: start from the gym's automatic warm-up for the heaviest set
       const ws = [...document.querySelectorAll(`.ssr.ed[data-row="${bi}"] [data-ss="w"]`)].map((x) => +x.value || 0), top = Math.max(0, ...ws), c2 = client(sessBlock(bi).p2.clientId), m = c2 && c2.maxes[b.ex] ? P.targetOf(c2.maxes[b.ex], UNITS) : 0;
       const plan = top ? P.warmupPlan({ work: top, bar: BAR, max: m, step: 5, def: db.warmupDefault }) : [];
       sessSaveWu(bi, plan.length ? plan.map((x) => `${x.w}x${x.r}`).join(", ") : `${BAR}x5`); } return; }
