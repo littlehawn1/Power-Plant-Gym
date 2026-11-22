@@ -406,7 +406,7 @@ function calendarHTML(c) {
   const today = todayISO(), ym = UI.calMonth || today.slice(0, 7), [Y, M] = ym.split("-").map(Number);
   const first = new Date(Y, M - 1, 1), start = new Date(first); start.setDate(1 - ((first.getDay() + 6) % 7));
   const logs = logsOf(c.id), sched = scheduledFor(c.id), notes = db.dayNotes[c.id] || {};
-  const used = new Set(), cells = [];
+  const used = new Set(), cells = []; let extra = 0;
   const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   for (let i = 0; i < 42; i++) {
     const d = new Date(start); d.setDate(start.getDate() + i); const k = iso(d), inMonth = d.getMonth() === M - 1;
@@ -417,7 +417,7 @@ function calendarHTML(c) {
       if (l) used.add(l.id);
       items.push({ title: `${s.day.name}`, note: s.day.note, status: l ? "done" : k < today ? "missed" : "up", log: l, rx: s.day.items, drag: l ? "" : `${s.p.id}|${s.w}|${s.day.id}`, moved: s.day.moved });
     }
-    for (const l of logs.filter((x) => !used.has(x.id) && x.date.slice(0, 10) === k)) { used.add(l.id); items.push({ title: l.name, status: "done", log: l }); }
+    for (const l of logs.filter((x) => !used.has(x.id) && x.date.slice(0, 10) === k)) { used.add(l.id); if (inMonth) extra++; if (UI.calExtra) items.push({ title: l.name, status: "done extra", log: l }); } // logged, but not the workout scheduled that day
     cells.push(`<div class="cday${inMonth ? "" : " out"}${k === today ? " today" : ""}" data-date="${k}"><div class="cd-hd"><span>${d.getDate()}</span><button class="flagbtn${notes[k] ? " on" : ""}" data-act="daynote" data-c="${c.id}" data-d="${k}" title="${notes[k] ? esc(notes[k]) : "Add a private note (only coaches see it)"}" aria-label="Private note for ${k}">⚑</button></div>
       ${items.map((it) => `<div class="cw ${it.status}${it.drag ? " drag" : ""}"${it.drag ? ` draggable="true" data-drag="${it.drag}" data-act="wk-open" data-c="${c.id}" tabindex="0" role="button" title="Click to see and change this workout. Drag to move it."` : it.log ? ` data-act="log-open" data-l="${esc(it.log.id)}" tabindex="0" role="button" title="See what was logged"` : ""}><b>${esc(it.title)}${it.moved ? ` <span class="moved" title="Moved from its usual day">↷</span>` : ""}</b>${it.drag ? `<button class="cw-x" data-act="wk-off" data-drag="${it.drag}" title="Remove from calendar" aria-label="Remove ${esc(it.title)} from the calendar">×</button>` : ""}${it.note ? `<div class="cwn">${esc(it.note)}</div>` : ""}
         ${it.log ? (it.log.exercises || []).map((e) => `<div class="cx"><span class="ck ${(e.sets || []).length ? "y" : "n"}">${(e.sets || []).length ? "✓" : "✗"}</span><span>${esc(exMeta(e.ex).name)}<br><span class="sub num">${esc(setsText(e) || "–")}</span></span></div>`).join("")
@@ -427,6 +427,7 @@ function calendarHTML(c) {
   const label = first.toLocaleDateString(undefined, { month: "long", year: "numeric" });
   return `<section class="panel"><div class="row"><button class="btn small" data-act="cal-move" data-d="-1" aria-label="Previous month">‹</button><h2 class="grow" style="text-align:center">${label}</h2><button class="btn small" data-act="cal-move" data-d="1" aria-label="Next month">›</button><button class="btn small ghost" data-act="cal-today">Today</button></div>
     <div class="cal-key sub"><span class="cw done">Completed</span><span class="cw missed">Missed</span><span class="cw up">Upcoming</span><span>⚑ private coach note</span><span>Drag a workout to move it · × removes it</span></div>
+    <label class="cal-extra sub"><input type="checkbox" id="cal-extra" ${UI.calExtra ? "checked" : ""}> Show workouts that weren’t scheduled for that day${extra ? ` (${extra} this month${UI.calExtra ? "" : ", hidden"})` : ""}</label>
     <div class="cal">${["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((x) => `<div class="cdow">${x}</div>`).join("")}${cells.join("")}</div></section>`;
 }
 
@@ -1103,6 +1104,7 @@ document.addEventListener("change", (ev) => {
   if (t.id === "mx-add" && t.value) { client(t.dataset.c).maxes[t.value] = {}; save(); route(); return; }
   if (t.id === "mx-tpl" && t.value) { const c = client(t.dataset.c), tp = db.maxTemplates.find((x) => x.id === t.value); for (const id of tp.lifts) c.maxes[id] = c.maxes[id] || {}; save(); route(); return; }
   if (t.id === "from-tpl" && t.value) { const src = prog(t.value), np = clone(src); np.id = pid(); np.clientId = t.dataset.c; np.template = false; np.coach = me().name; db.programs.push(np); save(); UI.day = 0; location.hash = "#program-" + np.id; toast("Copied. Set the start date and adjust anything for this client."); return; }
+  if (t.id === "cal-extra") { UI.calExtra = t.checked; route(); return; }
   if (t.id === "feed-flag") { UI.feedFlagged = t.checked; route(); return; }
   if (t.id === "tplfile") {
     // A file of saved programs made from another coaching app (e.g. the TrueCoach import). Adding the same file twice adds nothing new.
