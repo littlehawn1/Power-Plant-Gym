@@ -2,7 +2,7 @@
    Data lives on the phone and syncs to the client's account in the gym's Supabase project (see "Account + sync"). */
 (() => {
 "use strict";
-const APP_VERSION = "0.8.6";
+const APP_VERSION = "0.8.7";
 const PP = window.PPProgram;
 const APP_NAME = "Power Plant";
 
@@ -794,7 +794,9 @@ function setRowHTML(ei, si, it, e, x, prev, workIdx, fields, lab) {
   const tyLabel = lab ? lab + (x.t === "n" ? "" : SET_LABEL[x.t]) : x.t === "n" ? workIdx : SET_LABEL[x.t];
   const cols = fields ? fields.length : e.track === "time" ? 1 : 2;
   const miss = x.done && e.track === "wr" && x.t !== "w" && x.r < e.repsMin;
-  const inp = (f, val, attrs) => `<input data-f="${f}" data-e="${ei}" data-s="${si}" value="${esc(val)}" ${attrs}>`;
+  // In supersets/circuits each row can record different things, so every box gets its own small label.
+  const cap = { w: isBW(e.kind) ? "+" + S.state.units : S.state.units, r: "reps", s: "time", d: distUnit(e), h: "in" };
+  const inp = (f, val, attrs) => { const el = `<input data-f="${f}" data-e="${ei}" data-s="${si}" value="${esc(val)}" ${attrs}>`; return lab ? `<label class="cellcap"><span class="cap">${cap[f]}</span>${el}</label>` : el; };
   let cells = "";
   if (fields) cells = fields.map((f) => f === "w" ? (isBW(e.kind) ? inp("w", x.w > 0 ? fmt(x.w) : "", `inputmode="decimal" placeholder="+0" aria-label="Added weight"`) : inp("w", x.w ? fmt(x.w) : "", `inputmode="decimal" placeholder="${x.top ? x.top + "%" : S.state.units}" aria-label="Weight"`))
       : f === "r" ? inp("r", x.r ?? "", `inputmode="numeric" placeholder="${x.rr ? x.rr : x.t === "f" ? "max" : "reps"}" aria-label="Reps${x.rr ? ", target " + x.rr : ""}"`)
