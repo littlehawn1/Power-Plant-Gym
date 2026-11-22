@@ -35,10 +35,15 @@ const fieldsText = (f) => f.map((k) => LIBR.FIELD_NAMES[k].toLowerCase()).join("
 const KEY = "ppc1.db";
 let db = null;
 function load() { try { db = JSON.parse(localStorage.getItem(KEY)); } catch { db = null; } if (!db || !db.v) db = seed(); migrate(db); }
+const QRE = /\?|check.?in|goal review|reflection|^how (are|is|was|did|do|has|have)\b|^what('s| was| are| do| is)?\b|^did you|^is there|^any questions|^are there|^was there|^overall,? (feeling|how)|biggest (win|challenge)|^this week'?s plan|anything else you want/i;
 function migrate(d) {
   d.maxTemplates = d.maxTemplates || [{ id: "mt1", name: "Squat, bench, deadlift", lifts: ["squat", "bench", "deadlift"] }];
   d.dayNotes = d.dayNotes || {};
   d.warmupDefault = P.warmupDefaultOf(d.warmupDefault);
+  if (!d.qMarked) { // TrueCoach check-in questions came in as exercises; mark them as questions once
+    for (const e of Object.values(d.custom || {})) if (e && e.name && QRE.test(e.name.trim()) && e.kind !== "question") { e.kind = "question"; e.fields = []; d._qChanged = (d._qChanged || 0) + 1; }
+    d.qMarked = true;
+  }
   for (const c of d.clients) c.maxes = c.maxes || {};
   d.v = 2;
 }
@@ -83,7 +88,7 @@ async function loadCloud() {
   for (const r of wo.data) d.logs.push({ ...(r.data || {}), id: r.id, clientId: r.client_id });
   for (const n of dn.data) (d.dayNotes[n.client_id] = d.dayNotes[n.client_id] || {})[n.day] = n.note;
   const s = (gs.data.find((x) => x.key === "coach") || {}).data || {};
-  d.custom = s.custom || {}; if (s.maxTemplates) d.maxTemplates = s.maxTemplates; if (s.warmupDefault) d.warmupDefault = s.warmupDefault;
+  d.custom = s.custom || {}; if (s.maxTemplates) d.maxTemplates = s.maxTemplates; if (s.warmupDefault) d.warmupDefault = s.warmupDefault; if (s.qMarked) d.qMarked = true;
   migrate(d);
   return d;
 }
@@ -102,7 +107,7 @@ function rowsOf(d) {
     out.prog[p.id] = { id: p.id, client_id: p.template ? null : p.clientId || null, name: p.name || "", data };
   }
   for (const [cid, days] of Object.entries(d.dayNotes || {})) for (const [day, note] of Object.entries(days)) if (note) out.day[cid + "|" + day] = { client_id: cid, day, note };
-  out.set.coach = { key: "coach", data: { custom: d.custom || {}, maxTemplates: d.maxTemplates || [], warmupDefault: d.warmupDefault } };
+  out.set.coach = { key: "coach", data: { custom: d.custom || {}, maxTemplates: d.maxTemplates || [], warmupDefault: d.warmupDefault, qMarked: !!d.qMarked } };
   return out;
 }
 const hashRows = (r) => Object.fromEntries(Object.entries(r).map(([k, m]) => [k, Object.fromEntries(Object.entries(m).map(([id, v]) => [id, Cloud.hash(v)]))]));
@@ -160,6 +165,7 @@ async function boot() {
     $("#me").closest("label").hidden = true; return;
   }
   snap = hashRows(rowsOf(db)); loadedAt = Date.now();
+  if (db._qChanged) { const n = db._qChanged; delete db._qChanged; snap.set = {}; snap.prog = {}; save(); setTimeout(() => toast(`Marked ${n} imported check-in question${n === 1 ? "" : "s"} as questions: clients now type an answer instead of logging sets.`), 600); }
   renderTop(); route();
   loadMessages().catch(() => {}); subscribeMessages();
 }
@@ -347,6 +353,7 @@ function logFlags(l) {
     const minReps = rx && rx.groups ? Math.min(...rx.groups.filter((g) => g.reps && !g.amrap).map((g) => g.reps)) : e.rxReps || 0;
     if (minReps > 0 && isFinite(minReps) && work.some((x) => x.r > 0 && x.r < minReps)) f.missed.push(`${name}: under ${minReps} reps`);
     if (PAIN.test(e.note || "")) f.pain.push(`${name}: “${e.note}”`);
+    if (e.question && PAIN.test(e.answer || "")) f.pain.push(`${name}: “${e.answer}”`);
   }
   if (PAIN.test(l.note || "")) f.pain.push(`“${l.note}”`);
   f.any = f.pr.length + f.missed.length + f.pain.length > 0;
@@ -364,7 +371,7 @@ function logCardInner(l, showClient) {
     ${f.any ? `<div class="flags">${f.pr.map((x) => `<span class="flag pr">PR · ${esc(x)}</span>`).join("")}${f.missed.map((x) => `<span class="flag miss">Missed · ${esc(x)}</span>`).join("")}${f.pain.map((x) => `<span class="flag pain">Pain · ${esc(x)}</span>`).join("")}</div>` : ""}
     ${l.note ? `<div class="cnote">“${esc(l.note)}”</div>` : ""}
     ${(() => { const fc = MS.list.filter((m) => m.workout_id === l.id && m.video_path); return fc.length ? `<a class="fcl" href="#client-${l.clientId}" data-act="open-conv" data-c="${l.clientId}">🎥 ${fc.length === 1 ? "Form-check video" : fc.length + " form-check videos"}${fc[0].ex ? ` · ${esc(exMeta(fc[0].ex).name)}` : ""}: open in messages</a>` : ""; })()}
-    ${(l.exercises || []).map((e) => `<div class="wex"><span><b>${esc(exMeta(e.ex).name)}</b><br><span class="rx">${esc(rxStr(e))}</span></span><span class="num">${esc(setsText(e))}${e.note ? `<div class="cnote" style="margin-top:6px">“${esc(e.note)}”</div>` : ""}</span></div>`).join("")}
+    ${(l.exercises || []).map((e) => e.question ? `<div class="wex q"><span><b>${esc(exMeta(e.ex).name || e.name)}</b></span><span class="cnote">“${esc(e.answer || "")}”</span></div>` : `<div class="wex"><span><b>${esc(exMeta(e.ex).name)}</b><br><span class="rx">${esc(rxStr(e))}</span></span><span class="num">${esc(setsText(e))}${e.note ? `<div class="cnote" style="margin-top:6px">“${esc(e.note)}”</div>` : ""}</span></div>`).join("")}
   </article>`;
 }
 const logsOf = (cid) => db.logs.filter((l) => l.clientId === cid).sort((a, b) => (a.date < b.date ? 1 : -1));
@@ -419,7 +426,7 @@ function calendarHTML(c) {
     for (const l of logs.filter((x) => !used.has(x.id) && x.date.slice(0, 10) === k)) { used.add(l.id); items.push({ title: l.name, status: "done extra", log: l }); } // logged, but not the workout scheduled that day
     cells.push(`<div class="cday${inMonth ? "" : " out"}${k === today ? " today" : ""}" data-date="${k}"><div class="cd-hd"><span>${d.getDate()}</span><button class="flagbtn${notes[k] ? " on" : ""}" data-act="daynote" data-c="${c.id}" data-d="${k}" title="${notes[k] ? esc(notes[k]) : "Add a private note (only coaches see it)"}" aria-label="Private note for ${k}">⚑</button></div>
       ${items.map((it) => `<div class="cw ${it.status}${it.drag ? " drag" : ""}"${it.drag ? ` draggable="true" data-drag="${it.drag}" data-act="wk-open" data-c="${c.id}" tabindex="0" role="button" title="Click to see and change this workout. Drag to move it."` : it.log ? ` data-act="log-open" data-l="${esc(it.log.id)}" tabindex="0" role="button" title="See what was logged"` : ""}><b>${esc(it.title)}${it.moved ? ` <span class="moved" title="Moved from its usual day">↷</span>` : ""}</b>${it.drag ? `<button class="cw-x" data-act="wk-off" data-drag="${it.drag}" title="Remove from calendar" aria-label="Remove ${esc(it.title)} from the calendar">×</button>` : ""}${it.note ? `<div class="cwn">${esc(it.note)}</div>` : ""}
-        ${it.log ? (it.log.exercises || []).map((e) => `<div class="cx"><span class="ck ${(e.sets || []).length ? "y" : "n"}">${(e.sets || []).length ? "✓" : "✗"}</span><span>${esc(exMeta(e.ex).name)}<br><span class="sub num">${esc(setsText(e) || "–")}</span></span></div>`).join("")
+        ${it.log ? (it.log.exercises || []).map((e) => e.question ? `<div class="cx"><span class="ck y">?</span><span>${esc(exMeta(e.ex).name)}<br><span class="sub">“${esc((e.answer || "").slice(0, 60))}${(e.answer || "").length > 60 ? "…" : ""}”</span></span></div>` : `<div class="cx"><span class="ck ${(e.sets || []).length ? "y" : "n"}">${(e.sets || []).length ? "✓" : "✗"}</span><span>${esc(exMeta(e.ex).name)}<br><span class="sub num">${esc(setsText(e) || "–")}</span></span></div>`).join("")
           : (it.rx || []).map((x) => `<div class="cx"><span class="ck">${it.status === "missed" ? "✗" : "·"}</span><span>${esc(exMeta(x.ex).name)}</span></div>`).join("")}</div>`).join("")}
     </div>`);
   }
@@ -479,13 +486,13 @@ function exListHTML() {
   if (f === "deleted") { const del = allEx(true).filter((m) => m.deleted).sort((a, b) => a.name.localeCompare(b.name));
     return `<p class="sub">${del.length} deleted. Restoring one puts it back in the list coaches pick from.</p>${del.map((m) => `<div class="exrow"><span class="grow"><b>${esc(m.name)}</b><span class="sub"> · ${esc(m.muscle || "Other")}</span></span><button class="btn small" data-act="ex-restore" data-id="${esc(m.id)}">Restore</button></div>`).join("") || `<div class="empty">Nothing deleted.</div>`}`; }
   const all = allEx()
-    .filter((m) => f === "all" || (f === "yours" ? !isBuiltIn(m.id) : f === "changed" ? isBuiltIn(m.id) && db.custom[m.id] : f === "video" ? videoOf(m) : f === "novideo" ? !videoOf(m) : true))
+    .filter((m) => f === "all" || (f === "yours" ? !isBuiltIn(m.id) : f === "changed" ? isBuiltIn(m.id) && db.custom[m.id] : f === "questions" ? m.kind === "question" : f === "video" ? videoOf(m) : f === "novideo" ? !videoOf(m) : true))
     .filter((m) => !q || m.name.toLowerCase().includes(q) || (m.muscle || "").toLowerCase().includes(q) || (m.kind || "").toLowerCase().includes(q));
   const groups = {}; for (const m of all) (groups[m.muscle || "Other"] = groups[m.muscle || "Other"] || []).push(m);
   const order = [...LIBR.MUSCLES, ...Object.keys(groups).filter((x) => !LIBR.MUSCLES.includes(x)).sort()];
   const out = order.filter((mu) => groups[mu]).map((mu) => `<div class="exgrp"><h3>${esc(mu)} <span class="sub">${groups[mu].length}</span></h3>${groups[mu].sort((a, b) => a.name.localeCompare(b.name)).map((m) => {
     const v = videoOf(m), mine = !isBuiltIn(m.id), changed = !mine && db.custom[m.id];
-    return `<button class="exrow" data-act="ex-open" data-id="${esc(m.id)}"><span class="grow"><b>${esc(m.name)}</b><span class="sub"> · ${esc(m.kind || "other")}</span></span>${mine ? `<span class="tag">Added by coaches</span>` : changed ? `<span class="tag">Edited</span>` : ""}${v ? `<span class="tag vid">▶ Video</span>` : ""}</button>`;
+    return `<button class="exrow" data-act="ex-open" data-id="${esc(m.id)}"><span class="grow"><b>${esc(m.name)}</b><span class="sub"> · ${esc(m.kind || "other")}</span></span>${m.kind === "question" ? `<span class="tag">Question</span>` : ""}${mine ? `<span class="tag">Added by coaches</span>` : changed ? `<span class="tag">Edited</span>` : ""}${v ? `<span class="tag vid">▶ Video</span>` : ""}</button>`;
   }).join("")}</div>`).join("");
   return `<p class="sub">${all.length} exercise${all.length === 1 ? "" : "s"}</p>${out || `<div class="empty">Nothing matches. Use “+ New exercise” to add it.</div>`}`;
 }
@@ -495,7 +502,7 @@ function renderExercises() {
   $("#view").innerHTML = `<div class="row"><h1 class="grow">Exercises</h1><button class="btn" data-act="ex-export">Download exercise list</button><button class="btn primary" data-act="ex-new">+ New exercise</button></div>
     <p class="sub">All ${n} exercises coaches can put in a program. The gym’s exercises come with the app, and many have a video from the gym’s YouTube channel. Click any exercise to change its name, category, equipment, video or what clients record, or to delete it. Changes are saved for every coach and reach clients with their programs.</p>
     <div class="row"><input class="in grow" id="ex-q" placeholder="Search by name, muscle or equipment" value="${esc(UI.exQ || "")}" autocomplete="off">
-      <select class="in" id="ex-f" aria-label="Show"><option value="all">All</option><option value="yours" ${UI.exF === "yours" ? "selected" : ""}>Added by coaches</option><option value="video" ${UI.exF === "video" ? "selected" : ""}>With a video</option><option value="novideo" ${UI.exF === "novideo" ? "selected" : ""}>Without a video</option><option value="changed" ${UI.exF === "changed" ? "selected" : ""}>Gym exercises you edited</option><option value="deleted" ${UI.exF === "deleted" ? "selected" : ""}>Deleted</option></select></div>
+      <select class="in" id="ex-f" aria-label="Show"><option value="all">All</option><option value="yours" ${UI.exF === "yours" ? "selected" : ""}>Added by coaches</option><option value="video" ${UI.exF === "video" ? "selected" : ""}>With a video</option><option value="novideo" ${UI.exF === "novideo" ? "selected" : ""}>Without a video</option><option value="changed" ${UI.exF === "changed" ? "selected" : ""}>Gym exercises you edited</option><option value="questions" ${UI.exF === "questions" ? "selected" : ""}>Check-in questions</option><option value="deleted" ${UI.exF === "deleted" ? "selected" : ""}>Deleted</option></select></div>
     <div id="ex-list">${exListHTML()}</div>`;
 }
 // The written guide clients see under "How to": coaches' version if they wrote one, else the app's.
@@ -529,6 +536,7 @@ function exFormHTML(m) {
       <label class="f">Muscle / category<input class="in" id="nx-muscle" value="${esc((m && m.muscle) || "Strongman")}" list="muscles"><datalist id="muscles">${cats.map((x) => `<option value="${esc(x)}">`).join("")}</datalist></label>
       <label class="f">Equipment<input class="in" id="nx-kind" value="${esc((m && m.kind) || "strongman")}" list="kinds"><datalist id="kinds">${LIBR.KINDS.map((x) => `<option value="${x}">`).join("")}</datalist></label>
       <label class="f">YouTube link (optional)<input class="in" id="nx-video" value="${esc((m && m.video) || "")}" placeholder="https://youtu.be/…"></label>
+      <label class="fields" style="grid-column:1/-1"><input type="checkbox" id="nx-q" ${m && m.kind === "question" ? "checked" : ""}> <b>This is a check-in question</b> <span class="sub">(the client types an answer instead of logging sets)</span></label>
       <div class="fields" style="grid-column:1/-1"><span class="sub">Clients record:</span>${Object.entries(LIBR.FIELD_NAMES).map(([k, n]) => `<label><input type="checkbox" class="nx-f" value="${k}" ${f.includes(k) ? "checked" : ""}> ${n}</label>`).join("")}</div>
     </div>${guideFormHTML(m && m.id ? guideFor(m.id) : null)}`;
 }
@@ -537,6 +545,7 @@ function readExForm() {
   const fields = [...document.querySelectorAll(".nx-f:checked")].map((x) => x.value);
   const out = { name, muscle: $("#nx-muscle").value.trim() || "Other", kind: $("#nx-kind").value.trim().toLowerCase() || "other", video: $("#nx-video").value.trim(), fields: fields.length ? fields : ["w", "r"] };
   const g = readGuide(); if (g !== undefined) out.guide = g;
+  if ($("#nx-q") && $("#nx-q").checked) { out.kind = "question"; out.fields = []; } else if (out.kind === "question") out.kind = "other";
   return out;
 }
 function openExercise(id) {

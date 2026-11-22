@@ -2,7 +2,7 @@
    Data lives on the phone and syncs to the client's account in the gym's Supabase project (see "Account + sync"). */
 (() => {
 "use strict";
-const APP_VERSION = "0.8.5";
+const APP_VERSION = "0.8.6";
 const PP = window.PPProgram;
 const APP_NAME = "Power Plant";
 
@@ -475,6 +475,7 @@ function finishWorkout() {
   const results = [];
   for (const it of a.items) {
     const e = getEx(it.ex);
+    if (it.q) continue; // answers go with the workout, not the lift results
     const done = it.sets.filter((x) => x.done);
     if (!done.length) { results.push({ ex: it.ex, name: e.name, skipped: true }); continue; }
     if (e.track !== "wr" || a.prog) { results.push({ ex: it.ex, name: e.name, track: e.track, sets: done, rx: it.rx }); continue; }
@@ -497,8 +498,9 @@ function finishWorkout() {
   const minutes = Math.round((Date.now() - Date.parse(a.startedAt)) / 60000);
   const w = {
     id: uid(), v: 3, date: a.startedAt, name: a.name, routine: a.routine, prog: a.prog || null, minutes, units: S.state.units, note: a.note || "",
-    exercises: a.items.filter((it) => it.sets.some((x) => x.done)).map((it) => {
+    exercises: a.items.filter((it) => (it.q ? (it.answer || "").trim() : it.sets.some((x) => x.done))).map((it) => {
       const e = getEx(it.ex);
+      if (it.q) return { ex: it.ex, name: e.name, kind: "question", question: true, answer: it.answer.trim(), sets: [] };
       return { ex: it.ex, name: e.name, kind: e.kind, muscle: e.muscle, track: e.track, repsMin: e.repsMin, repsMax: e.repsMax, rx: it.rx || null, group: it.group || null, fields: it.fields || null, note: it.note || "", sets: it.sets.filter((x) => x.done).map(({ done, ...x }) => x) };
     }),
   };
@@ -668,7 +670,9 @@ function rxText(it, grouped) {
   else if (L.t === "rpe") load = `RPE ${fmt(L.v)}${hi}`;
   return [base, load, it.rest && !grouped ? `rest ${mmss(it.rest)}` : ""].filter(Boolean).join(" · ");
 }
+const isQ = (e) => !!e && e.kind === "question"; // a check-in question: the client types an answer instead of logging sets
 function rxEntry(it) {
+  if (isQ(getEx(it.ex))) return { ex: it.ex, note: "", rx: it, group: null, fields: [], sets: [], q: true, answer: "" };
   if (it.groups) {
     const e = getEx(it.ex), fields = it.fields || TRACKF[e.track] || ["w", "r"], sets = [];
     const groups = it.groups.length ? it.groups : [{ sets: +((it.text || "").match(/^\s*(\d+)\s*[x×]/i) || [])[1] || 1 }]; // written-out cells: one row per set we can count, else one
@@ -893,7 +897,13 @@ function exToolsHTML(a, ei, it, e, lab) {
     ${noteOpen ? `<textarea class="ex-note" data-note="${ei}" rows="1" placeholder="Note for this workout: how it felt, form, pain…" aria-label="Note for ${esc(e.name)}">${esc(it.note)}</textarea>` : ""}`;
 }
 function exCardHTML(a, ei) {
-  const it = a.items[ei], e = getEx(it.ex), pv = prevFor(it);
+  const it = a.items[ei], e = getEx(it.ex);
+  if (it.q || isQ(e)) {
+    const words = it.rx && (it.rx.text || (it.rx.groups || []).length ? it.rx.text || "" : ""), note = it.rx && it.rx.note;
+    return `<section class="ex qcard"><div class="eyebrow">Check-in question</div><h3 class="qtext">${esc(e.name)}</h3>${words ? `<div class="coach-note">${PP.richText(words)}</div>` : ""}${note ? `<div class="coach-note">${PP.richText(note)}</div>` : ""}
+      <textarea class="ex-note" data-ans="${ei}" rows="3" placeholder="Type your answer for your coach…">${esc(it.answer || "")}</textarea></section>`;
+  }
+  const pv = prevFor(it);
   let wi = 0, wu = 0, ni = 0;
   const rows = it.sets.map((x, si) => { const p = x.t === "w" ? pv.warm[wu++] : pv.work[ni++]; if (x.t === "n") wi++; return setRowHTML(ei, si, it, e, x, p, wi, it.fields); }).join("");
   const hs = heads(it, e), topW = Math.max(0, ...it.sets.filter((x) => x.t === "n" || x.t === "f").map((x) => +x.w || 0));
@@ -1442,6 +1452,7 @@ document.addEventListener("click", async (ev) => {
   }
 });
 document.addEventListener("input", (ev) => {
+  if (ev.target.dataset && ev.target.dataset.ans != null && S.state.active) { const it = S.state.active.items[+ev.target.dataset.ans]; if (it) { it.answer = ev.target.value; saveState(); } return; }
   const t = ev.target;
   if (t.dataset.f && S.state.active) {
     const x = S.state.active.items[+t.dataset.e]?.sets[+t.dataset.s]; if (!x) return;
