@@ -785,7 +785,7 @@ function setsFor(text, ex, c, b, p, bi) {
   if (!t) return `<div class="ss sub">Nothing for this exercise this day.</div>`;
   if (SKIPC.test(t)) return `<div class="ss sub">Skipped this day.</div>`;
   const tr = P.parsePrescription(t), rowsTxt = bi != null ? String((b.rows || [])[w] || "").trim() : "";
-  const asText = tr.errors.length || tr.loose || !tr.groups.length, tw = !rowsTxt && asText ? P.textWarmup(t, tr.groups) : null; // "Warm up: 4x5" in the text
+  const asText = tr.errors.length || tr.loose || !tr.groups.length, tw = asText ? P.textWarmup(t, tr.groups) : null; // "Warm up: 4x5" in the text (still the warm-up after the sets were edited)
   const r = rowsTxt ? P.parsePrescription(rowsTxt) : tw ? { ...tr, groups: tw.groups } : tr;
   const max = c && c.maxes && c.maxes[ex] ? P.targetOf(c.maxes[ex], UNITS) : 0;
   const editable = bi != null && r.groups.every((g) => !g.time && !g.dist && !g.capped && !g.build);

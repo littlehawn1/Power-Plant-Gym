@@ -206,7 +206,7 @@
           // A coach can set the exact sets for one day (b.rows[w]) and its warm-up (b.wu[w]) from the calendar.
           // The client still reads the coach's text; the app logs these sets and warm-ups.
           const rowsTxt = String((b.rows || [])[w] || "").trim(), rr = rowsTxt ? parsePrescription(rowsTxt) : null, lg = rr && rr.groups.length ? rr : rx;
-          const tw = !rr && (rx.errors.length || rx.loose) ? textWarmup(cell, rx.groups) : null; if (tw) lg.groups = tw.groups; // lg is rx here
+          const tw = rx.errors.length || rx.loose ? textWarmup(cell, rx.groups) : null; if (tw && lg === rx) lg.groups = tw.groups; // the text's warm-up holds even when the coach set the day's sets
           const wuTxt = String((b.wu || [])[w] || "").trim() || (tw ? tw.warmup : "");
           return { ex: b.ex, warmup: wuTxt || b.warmup || "", text: rx.errors.length || rx.loose ? cell.trim() : "", groups: lg.groups, tempo: rx.tempo, pause: rx.pause, rest: b.rest || 0, note: [b.note, wn].filter(Boolean).join(" "), group: b.group || null, video: b.video || "", fields: b.fields || null, format: b.format || null, warmupSets: wuTxt ? !/^(none|no|off|skip)$/i.test(wuTxt) : !!b.warmupSets, sets: lg.groups.reduce((n, g) => n + g.sets, 0) };
         }).filter(Boolean),
