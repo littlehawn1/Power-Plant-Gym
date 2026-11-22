@@ -35,6 +35,6 @@ grant update (name, units, coach_id, remote, archived) on public.profiles to aut
 
 -- >>> OWNERS <<<  Put the owners' login emails here (lowercase). They must already be on the coach list or are added.
 insert into public.coach_emails (email, is_owner) values
-  ('change-me-josh@example.com', true),
-  ('change-me-jess@example.com', true)
+  (littlehawn1@gmail.com, true),
+  (jess@thepowerplantgym.com, true)
 on conflict (email) do update set is_owner = true;
