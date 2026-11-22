@@ -98,13 +98,15 @@
       out.groups.push(g);
     }
     // Free text with sets tucked inside sentences ("Think Lil Jon. Warm up: 4x5. 3 x 5-7 @65%."): pull those out.
-    if (!out.groups.length && out.errors.length) {
+    if (out.errors.length && out.groups.every((g) => !g.time && !g.dist && !g.capped && !g.build)) {
+      const found = [];
       const re = /(\d+)\s*[x×]\s*(\d+\s*[-–]\s*\d+|\d+\s*\+|\d+)(?![a-z0-9:])(?:\s*@\s*([0-9][0-9.]*\s*%?(?:\s*(?:lbs?|kg))?|rpe\s*\d+(?:\.\d+)?))?/gi;
       let m; while ((m = re.exec(out.raw))) {
         const t = parseTarget(m[2].replace(/\s+/g, "")), L = m[3] ? parseLoad(m[3]) : null;
-        if (t && +m[1] > 0 && +m[1] <= 20 && L !== undefined) out.groups.push({ sets: +m[1], ...t, ...(L ? { load: L } : {}) });
+        if (t && +m[1] > 0 && +m[1] <= 20 && L !== undefined) found.push({ sets: +m[1], ...t, ...(L ? { load: L } : {}) });
       }
-      if (out.groups.length) out.loose = true;
+      // keep labels like "(top set)" from the sets read normally
+      if (found.length >= out.groups.length && found.length) { out.groups = found.map((g) => { const o = out.groups.find((x) => x.label && x.sets === g.sets && x.reps === g.reps); return o ? { ...g, label: o.label } : g; }); out.loose = true; }
     }
     return out;
   }

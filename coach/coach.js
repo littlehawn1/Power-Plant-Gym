@@ -851,9 +851,24 @@ function sessSaveSets(bi) {
   const { p2, w, b } = sessBlock(bi); if (!b) return;
   const cell = (b.weeks || [])[w] || "", tr = P.parsePrescription(cell), asText = tr.errors.length || tr.loose || !tr.groups.length;
   const line = rowsToLine(bi, (b.rows || [])[w] || cell);
-  if (asText) { b.rows = b.rows || []; b.rows[w] = line || "1x1"; } // keep the coach's text; log these sets
-  else { b.weeks = b.weeks || []; while (b.weeks.length < p2.weeks) b.weeks.push(""); b.weeks[w] = line; const inp = document.querySelector(`[data-sess="${bi}"]`); if (inp) inp.value = line; }
+  if (asText) { // keep the coach's words, but put the new set numbers into the text so what the client reads matches
+    const nt = setsIntoText(cell, line);
+    b.weeks = b.weeks || []; while (b.weeks.length < p2.weeks) b.weeks.push(""); b.weeks[w] = nt;
+    if (b.rows) { b.rows[w] = ""; if (!b.rows.some(Boolean)) delete b.rows; }
+    const inp = document.querySelector(`[data-sess="${bi}"]`); if (inp) inp.value = nt;
+  } else { b.weeks = b.weeks || []; while (b.weeks.length < p2.weeks) b.weeks.push(""); b.weeks[w] = line; const inp = document.querySelector(`[data-sess="${bi}"]`); if (inp) inp.value = line; }
   save(); sessRedraw(bi);
+}
+// Swap the sets written inside a coach's text (e.g. "3 x 5-7 @65%") for the edited ones; the "Warm up: 4x5" part stays.
+function setsIntoText(text, line) {
+  const re = /(\d+)\s*[x×]\s*(\d+\s*[-–]\s*\d+|\d+\s*\+|\d+)(?![a-z0-9:])(?:\s*@\s*(?:[0-9][0-9.]*\s*(?:[-–]\s*[0-9][0-9.]*)?\s*%?(?:\s*(?:lbs?|kg))?|rpe\s*\d+(?:\.\d+)?(?:\s*[-–]\s*\d+(?:\.\d+)?)?))?(?:\s*\([^)]*\))?/gi;
+  const spans = []; let m;
+  while ((m = re.exec(text))) { if (/warm\s*-?\s*ups?\s*[:\-–]?\s*$/i.test(text.slice(Math.max(0, m.index - 14), m.index))) continue; spans.push([m.index, m.index + m[0].length]); }
+  if (!line) line = "1x1";
+  if (!spans.length) return `${text.trim()} ${line}`.trim();
+  let out = text.slice(0, spans[0][0]) + line, at = spans[0][1];
+  for (let i = 1; i < spans.length; i++) { out += text.slice(at, spans[i][0]).replace(/[\s,;]+$/, ""); at = spans[i][1]; }
+  return out + text.slice(at);
 }
 function sessSaveWu(bi, text) { const { w, b } = sessBlock(bi); if (!b) return; b.wu = b.wu || []; if (text == null) { b.wu[w] = ""; if (!b.wu.some(Boolean)) delete b.wu; } else b.wu[w] = text; save(); sessRedraw(bi); }
 function sessRedraw(bi) { const { p2, w, b } = sessBlock(bi); const box = $("#ss-" + bi); if (box && b) box.innerHTML = setsFor((b.weeks || [])[w] || "", b.ex, client(p2.clientId), b, p2, bi); }
