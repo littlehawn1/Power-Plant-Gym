@@ -222,3 +222,4 @@ table.maxt { width: 100%; border-collapse: collapse; font-size: 14px; }
 .ssr.ed .in { width: 4.5em; padding: 4px 6px; display: inline-block; }
 .cal-extra { display: flex; align-items: center; gap: 6px; margin: 4px 0 8px; }
 .cw.extra { border-left-style: dashed; }
+.sess-toggle { display: flex; align-items: center; gap: 6px; margin-top: 8px; }

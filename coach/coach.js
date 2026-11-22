@@ -405,7 +405,7 @@ function calendarHTML(c) {
   const today = todayISO(), ym = UI.calMonth || today.slice(0, 7), [Y, M] = ym.split("-").map(Number);
   const first = new Date(Y, M - 1, 1), start = new Date(first); start.setDate(1 - ((first.getDay() + 6) % 7));
   const logs = logsOf(c.id), sched = scheduledFor(c.id), notes = db.dayNotes[c.id] || {};
-  const used = new Set(), cells = []; let extra = 0;
+  const used = new Set(), cells = [];
   const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   for (let i = 0; i < 42; i++) {
     const d = new Date(start); d.setDate(start.getDate() + i); const k = iso(d), inMonth = d.getMonth() === M - 1;
@@ -416,7 +416,7 @@ function calendarHTML(c) {
       if (l) used.add(l.id);
       items.push({ title: `${s.day.name}`, note: s.day.note, status: l ? "done" : k < today ? "missed" : "up", log: l, rx: s.day.items, drag: l ? "" : `${s.p.id}|${s.w}|${s.day.id}`, moved: s.day.moved });
     }
-    for (const l of logs.filter((x) => !used.has(x.id) && x.date.slice(0, 10) === k)) { used.add(l.id); if (inMonth) extra++; if (UI.calExtra) items.push({ title: l.name, status: "done extra", log: l }); } // logged, but not the workout scheduled that day
+    for (const l of logs.filter((x) => !used.has(x.id) && x.date.slice(0, 10) === k)) { used.add(l.id); items.push({ title: l.name, status: "done extra", log: l }); } // logged, but not the workout scheduled that day
     cells.push(`<div class="cday${inMonth ? "" : " out"}${k === today ? " today" : ""}" data-date="${k}"><div class="cd-hd"><span>${d.getDate()}</span><button class="flagbtn${notes[k] ? " on" : ""}" data-act="daynote" data-c="${c.id}" data-d="${k}" title="${notes[k] ? esc(notes[k]) : "Add a private note (only coaches see it)"}" aria-label="Private note for ${k}">⚑</button></div>
       ${items.map((it) => `<div class="cw ${it.status}${it.drag ? " drag" : ""}"${it.drag ? ` draggable="true" data-drag="${it.drag}" data-act="wk-open" data-c="${c.id}" tabindex="0" role="button" title="Click to see and change this workout. Drag to move it."` : it.log ? ` data-act="log-open" data-l="${esc(it.log.id)}" tabindex="0" role="button" title="See what was logged"` : ""}><b>${esc(it.title)}${it.moved ? ` <span class="moved" title="Moved from its usual day">↷</span>` : ""}</b>${it.drag ? `<button class="cw-x" data-act="wk-off" data-drag="${it.drag}" title="Remove from calendar" aria-label="Remove ${esc(it.title)} from the calendar">×</button>` : ""}${it.note ? `<div class="cwn">${esc(it.note)}</div>` : ""}
         ${it.log ? (it.log.exercises || []).map((e) => `<div class="cx"><span class="ck ${(e.sets || []).length ? "y" : "n"}">${(e.sets || []).length ? "✓" : "✗"}</span><span>${esc(exMeta(e.ex).name)}<br><span class="sub num">${esc(setsText(e) || "–")}</span></span></div>`).join("")
@@ -426,7 +426,6 @@ function calendarHTML(c) {
   const label = first.toLocaleDateString(undefined, { month: "long", year: "numeric" });
   return `<section class="panel"><div class="row"><button class="btn small" data-act="cal-move" data-d="-1" aria-label="Previous month">‹</button><h2 class="grow" style="text-align:center">${label}</h2><button class="btn small" data-act="cal-move" data-d="1" aria-label="Next month">›</button><button class="btn small ghost" data-act="cal-today">Today</button></div>
     <div class="cal-key sub"><span class="cw done">Completed</span><span class="cw missed">Missed</span><span class="cw up">Upcoming</span><span>⚑ private coach note</span><span>Drag a workout to move it · × removes it</span></div>
-    <label class="cal-extra sub"><input type="checkbox" id="cal-extra" ${UI.calExtra ? "checked" : ""}> Show workouts that weren’t scheduled for that day${extra ? ` (${extra} this month${UI.calExtra ? "" : ", hidden"})` : ""}</label>
     <div class="cal">${["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((x) => `<div class="cdow">${x}</div>`).join("")}${cells.join("")}</div></section>`;
 }
 
@@ -828,8 +827,11 @@ function sessionHTML(drag) {
   const [pid, ws, did] = drag.split("|"), w = +ws, p = prog(pid), day = p && p.days.find((x) => x.id === did); if (!day) return "";
   const c = client(p.clientId), cday = (P.compile(p).weeks[w] || { days: [] }).days.find((x) => x.id === did), date = cday && cday.date;
   const labels = groupLabels(day.blocks);
+  const inDay = (b) => { const c = ((b.weeks || [])[w] || "").trim(); return c && !/^(skip|off|none|n\/a|-+|—)$/i.test(c); };
+  const hidden = day.blocks.filter((b) => !inDay(b)).length;
   const rows = day.blocks.map((b, bi) => {
     const cell = (b.weeks || [])[w] || "", m = exMeta(b.ex), lab = labels[bi];
+    if (!inDay(b) && !UI.sessAll) return "";
     return `<div class="sess-ex${cell.trim() ? "" : " off"}"><div class="row"><b class="grow">${lab ? `<span class="glabel">${esc(lab.label)}</span> ` : ""}${esc(m.name)}</b>${b.rest ? `<span class="sub">rest ${mmss(b.rest)}</span>` : ""}</div>
       <input class="in" data-sess="${bi}" value="${esc(cell)}" placeholder="e.g. 3x5 @80% · 4x8 @135 · 3x10 @RPE8 · blank = not this day">
       <div id="ss-${bi}">${setsFor(cell, b.ex, c, b, p, bi)}</div></div>`;
@@ -837,7 +839,8 @@ function sessionHTML(drag) {
   return `<div class="row"><div class="grow"><div class="eyebrow">${esc(c ? c.name : "")}${date ? " · " + esc(dateLabel(date)) : ""}</div><h2>Week ${w + 1} · ${esc(day.name || "Workout")}</h2></div><button class="btn small ghost" data-act="modal-close">Done</button></div>
     <p class="sub">What ${esc(c ? c.name : "the client")} will see, with weights worked out from their maxes. Change any line and it updates for <b>this day only</b> (week ${w + 1} of “${esc(p.name)}”). Changes save as you type.</p>
     ${day.note ? `<div class="cnote">${P.richText(day.note)}</div>` : ""}${day.warmup ? `<div class="cnote"><b>Warm-up:</b> ${P.richText(day.warmup)}</div>` : ""}
-    <div class="sess">${rows}</div>
+    ${hidden ? `<label class="sess-toggle sub"><input type="checkbox" id="sess-all" ${UI.sessAll ? "checked" : ""}> Show exercises that aren’t part of this day’s workout (${hidden})</label>` : ""}
+    <div class="sess">${rows || `<div class="empty">No exercises are programmed for this day in week ${w + 1}.${hidden ? " Tick the box above to see the day’s other exercises and fill one in, or remove this workout from the calendar below." : ""}</div>`}</div>
     ${day.cooldown ? `<div class="cnote"><b>Cool-down:</b> ${P.richText(day.cooldown)}</div>` : ""}
     <div class="row sess-foot"><label class="f">Date<input class="in" type="date" id="mv-date" value="${date || ""}" data-drag="${esc(drag)}"></label><button class="btn" data-act="mv-save">Move to this date</button><button class="btn danger" data-act="mv-off">Remove from calendar</button><span class="grow"></span><a class="btn small ghost" href="#program-${p.id}" data-act="sess-prog" data-d="${p.days.indexOf(day)}" data-w="${w}" style="text-decoration:none">Open the whole program</a></div>`;
 }
@@ -1089,6 +1092,7 @@ document.addEventListener("change", (ev) => {
     const box = $("#ss-" + bi); if (box) box.innerHTML = setsFor(line, b.ex, client(p2.clientId), b, p2, bi);
     return;
   }
+  if (t.id === "sess-all" && UI.sess) { UI.sessAll = t.checked; $("#sess-box").innerHTML = sessionHTML(UI.sess); return; }
   if (t.id === "sc-client" && UI.sched) { UI.sched.cid = t.value; schedRedraw(); return; }
   if (t.id === "sc-start" && UI.sched) { UI.sched.start = t.value; schedRedraw(); return; }
   if (t.classList && t.classList.contains("sc-wd") && UI.sched) { UI.sched.wds = [...document.querySelectorAll(".sc-wd:checked")].map((x) => +x.value); schedRedraw(); return; }
@@ -1107,7 +1111,6 @@ document.addEventListener("change", (ev) => {
   }
   if (t.id === "mx-tpl" && t.value) { const c = client(t.dataset.c), tp = db.maxTemplates.find((x) => x.id === t.value); for (const id of tp.lifts) c.maxes[id] = c.maxes[id] || {}; save(); route(); return; }
   if (t.id === "from-tpl" && t.value) { const src = prog(t.value), np = clone(src); np.id = pid(); np.clientId = t.dataset.c; np.template = false; np.coach = me().name; db.programs.push(np); save(); UI.day = 0; location.hash = "#program-" + np.id; toast("Copied. Set the start date and adjust anything for this client."); return; }
-  if (t.id === "cal-extra") { UI.calExtra = t.checked; route(); return; }
   if (t.id === "feed-flag") { UI.feedFlagged = t.checked; route(); return; }
   if (t.id === "tplfile") {
     // A file of saved programs made from another coaching app (e.g. the TrueCoach import). Adding the same file twice adds nothing new.
