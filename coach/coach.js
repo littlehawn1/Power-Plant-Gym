@@ -573,26 +573,38 @@ const fmtW = (w) => String(Math.round(w * 100) / 100);
 /* ---- Coaches: the coach email list (coach_emails). Adding an email makes that login a coach, removing makes it a client. ---- */
 async function loadCoachList() {
   const el = $("#coach-list"); if (!el || !db.cloud) return;
-  const r = await Cloud.client().from("coach_emails").select("email").order("email");
+  const c = Cloud.client(); let r = await c.from("coach_emails").select("email,is_owner").order("email");
+  if (r.error) r = await c.from("coach_emails").select("email").order("email"); // before the owner update (supabase/owners.sql) is run
   if (r.error) { el.innerHTML = `<div class="flagtxt">Couldn’t load the coach list: ${esc(Cloud.friendly(r.error))}</div>`; return; }
   const mine = String((meUser && meUser.email) || "").toLowerCase(), names = Object.fromEntries((db.coachProfiles || []).map((x) => [x.email, x.name]));
-  el.innerHTML = r.data.map((x) => `<div class="row coach-row"><span class="grow"><b>${esc(names[x.email] || x.email)}</b>${names[x.email] ? ` <span class="sub">${esc(x.email)}</span>` : ` <span class="sub">hasn’t signed in yet</span>`}</span>
-      ${x.email === mine ? `<span class="sub">you</span>` : UI.confirm === "uncoach:" + x.email ? `<span class="sub">Remove as coach?</span><button class="btn small danger" data-act="coach-rm-yes" data-e="${esc(x.email)}">Remove</button><button class="btn small ghost" data-act="coach-rm-no">Keep</button>` : `<button class="btn small ghost" data-act="coach-rm" data-e="${esc(x.email)}">Remove</button>`}</div>`).join("") || `<div class="sub">No coaches on the list.</div>`;
+  const anyOwner = r.data.some((x) => x.is_owner), owner = !anyOwner || r.data.some((x) => x.email === mine && x.is_owner); // no owners set yet: every coach can manage
+  UI.isOwner = owner;
+  const form = $("#coach-add"), note = $("#coach-note"); if (form) form.hidden = !owner; if (note) note.hidden = owner;
+  el.innerHTML = r.data.map((x) => `<div class="row coach-row"><span class="grow"><b>${esc(names[x.email] || x.email)}</b>${x.is_owner ? ` <span class="pill good">Owner</span>` : ""}${names[x.email] ? ` <span class="sub">${esc(x.email)}</span>` : ` <span class="sub">${esc(names[x.email] ? "" : "hasn’t signed in yet")}</span>`}</span>
+      ${x.email === mine ? `<span class="sub">you</span>` : !owner ? "" : UI.confirm === "uncoach:" + x.email ? `<span class="sub">Remove as coach?</span><button class="btn small danger" data-act="coach-rm-yes" data-e="${esc(x.email)}">Remove</button><button class="btn small ghost" data-act="coach-rm-no">Keep</button>`
+        : `${"is_owner" in x ? `<button class="btn small ghost" data-act="coach-owner" data-e="${esc(x.email)}" data-v="${x.is_owner ? "0" : "1"}">${x.is_owner ? "Remove owner" : "Make owner"}</button>` : ""}<button class="btn small ghost" data-act="coach-rm" data-e="${esc(x.email)}">Remove</button>`}</div>`).join("") || `<div class="sub">No coaches on the list.</div>`;
 }
 async function coachListChange(email, add) {
-  const c = Cloud.client(), r = add ? await c.from("coach_emails").insert({ email }) : await c.from("coach_emails").delete().eq("email", email);
+  const c = Cloud.client(), r = add ? await c.from("coach_emails").insert({ email }) : await c.from("coach_emails").delete().eq("email", email).select("email");
   const dup = r.error && add && /duplicate|unique/i.test(r.error.message || "");
-  if (r.error && !dup) { toast(`Couldn’t ${add ? "add" : "remove"} ${email}: ${Cloud.friendly(r.error)}`); return; }
+  if (r.error && !dup) { toast(/row-level security|permission/i.test(r.error.message || "") ? "Only owners can add or remove coaches." : `Couldn’t ${add ? "add" : "remove"} ${email}: ${Cloud.friendly(r.error)}`); return; }
+  if (!add && r.data && !r.data.length) { toast("Only owners can add or remove coaches."); return; }
   UI.confirm = null; toast(dup ? `${email} is already a coach.` : add ? `${email} is now a coach. Send them the dashboard link.` : `${email} is no longer a coach. If they sign in, they’ll see the client app instead.`); loadCoachList();
+}
+async function coachOwner(email, on) {
+  const r = await Cloud.client().from("coach_emails").update({ is_owner: on }).eq("email", email).select("email");
+  if (r.error || !r.data || !r.data.length) { toast("Only owners can change who’s an owner."); return; }
+  toast(on ? `${email} is now an owner.` : `${email} is a regular coach now.`); loadCoachList();
 }
 function renderSettings() {
   setNav("settings");
   const d = db.warmupDefault, ex = (work, max, custom) => wuText(P.warmupPlan({ work, bar: 45, max, step: 5, def: d, custom }));
   $("#view").innerHTML = `<h1>Gym settings</h1>
     ${db.cloud ? `<section class="panel" style="max-width:760px"><h2>Coaches</h2>
-      <p class="sub">Anyone who signs in to this dashboard with an email on this list is a coach and sees every client. Everyone else who signs up is a client.</p>
+      <p class="sub">Anyone who signs in to this dashboard with an email on this list is a coach and sees every client. Everyone else who signs up is a client. <b>Owners</b> can also add and remove coaches.</p>
       <div id="coach-list"><div class="sub">Loading…</div></div>
-      <form class="row" id="coach-add" style="margin-top:8px"><input class="in grow" id="coach-email" type="email" placeholder="New coach’s email" autocomplete="off" required><button class="btn primary">Add coach</button></form>
+      <p class="sub" id="coach-note" hidden>Only owners can add or remove coaches.</p>
+      <form class="row" id="coach-add" style="margin-top:8px" hidden><input class="in grow" id="coach-email" type="email" placeholder="New coach’s email" autocomplete="off" required><button class="btn primary">Add coach</button></form>
       <p class="sub">Then send them the dashboard link (<a href="${esc(location.href.split("#")[0])}">${esc(location.href.split("#")[0])}</a>). They tap <b>Create an account</b> with that email, or just sign in if they already have one in the app.</p></section>` : ""}
     <section class="panel" style="max-width:760px"><h2>Warm-up sets</h2>
       <p class="sub">When a lift has warm-up sets turned on (in the program, under that exercise’s Settings), the client app fills them in before the first working set. The weights go up in even jumps from the empty bar to the working weight, rounded up to the nearest 5 lb.</p>
@@ -1035,6 +1047,7 @@ document.addEventListener("click", (ev) => {
     case "coach-rm": UI.confirm = "uncoach:" + t.dataset.e; loadCoachList(); break;
     case "coach-rm-no": UI.confirm = null; loadCoachList(); break;
     case "coach-rm-yes": coachListChange(t.dataset.e, false); break;
+    case "coach-owner": coachOwner(t.dataset.e, t.dataset.v === "1"); break;
     case "sched-open": schedOpen(t.dataset.c, t.dataset.src); break;
     case "sc-day": { const k = t.dataset.k; if (t.checked) UI.sched.sel.add(k); else UI.sched.sel.delete(k); schedRedraw(); break; }
     case "sc-week": { const w = +t.dataset.w, p2 = prog(UI.sched.src); for (const day of p2.days) if (hasWorkout(p2, w, day)) { const k = w + ":" + day.id; if (t.checked) UI.sched.sel.add(k); else UI.sched.sel.delete(k); } schedRedraw(); break; }
