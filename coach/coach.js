@@ -383,11 +383,10 @@ function maxesCardHTML(c) {
       <td><button class="icon" data-act="max-rm" data-c="${c.id}" data-ex="${esc(id)}" aria-label="Stop tracking ${esc(exMeta(id).name)}">✕</button></td></tr>`;
   }).join("");
   const tracked = new Set(ids);
-  const opts = allEx().filter((m) => !tracked.has(m.id)).map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join("");
   return `<section class="panel"><div class="row"><h2 class="grow">Maxes</h2><span class="sub">lb</span></div>
     ${rows ? `<table class="maxt"><thead><tr><th>Lift</th><th>5RM</th><th>Est. 1RM</th><th>Tested 1RM</th><th>Target max</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : `<div class="empty">No maxes tracked yet.</div>`}
     <p class="sub">Percentages in this client’s programs use the <b>target max</b>. Leave it blank to use the tested 1RM, or the estimate (5RM ÷ 0.83, rounded up to 5). New 5RMs the client logs are saved here; a new target waits for your OK.</p>
-    <div class="row"><select class="in" id="mx-add" data-c="${c.id}"><option value="">+ Track a lift…</option>${opts}</select>
+    <div class="row"><input class="in grow" id="mx-add" data-c="${c.id}" list="mx-list" placeholder="+ Track a lift… type to search" autocomplete="off"><datalist id="mx-list">${allEx().filter((m) => !tracked.has(m.id)).map((m) => `<option value="${esc(m.name)}">`).join("")}</datalist>
       <select class="in" id="mx-tpl" data-c="${c.id}"><option value="">Apply a max group…</option>${db.maxTemplates.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join("")}</select>
       ${ids.length ? `<button class="btn small ghost" data-act="mx-save-tpl" data-c="${c.id}">Save these lifts as a group</button>` : ""}</div></section>`;
 }
@@ -857,7 +856,7 @@ function removeSession(drag) {
 
 /* ---- Add workouts to a client's calendar (pick a program, tick workouts, pick days) ---- */
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-const hasWorkout = (p, w, day) => (day.blocks || []).some((b) => { const c = ((b.weeks || [])[w] || "").trim(); return c && !/^(skip|off|none|n\/a|-+|—)$/i.test(c); }) || day.warmup || day.cooldown;
+const hasWorkout = (p, w, day) => P.dayActive(day, w);
 function schedOpen(cid, srcId) {
   if (!cid) { if (!db.clients.length) { toast("Add a client first."); return; } cid = db.clients[0].id; }
   const own = programsOf(cid), tpls = db.programs.filter((p) => p.template);
@@ -1101,7 +1100,11 @@ document.addEventListener("change", (ev) => {
   if (t.id === "c-coach") { client(t.dataset.c).coachId = t.value || null; save(); return; }
   if (t.id === "c-remote") { client(t.dataset.c).remote = t.value === "1"; save(); return; }
   if (t.dataset.mx) { const [cid, ex, f] = t.dataset.mx.split("|"), c = client(cid), v = parseFloat(t.value); c.maxes[ex] = c.maxes[ex] || {}; if (isFinite(v) && v > 0) c.maxes[ex][f] = v; else delete c.maxes[ex][f]; save(); route(); return; }
-  if (t.id === "mx-add" && t.value) { client(t.dataset.c).maxes[t.value] = {}; save(); route(); return; }
+  if (t.id === "mx-add" && t.value.trim()) { // match the typed or picked name to an exercise
+    const q = t.value.trim().toLowerCase(), all = allEx(), m = all.find((x) => x.name.toLowerCase() === q) || (all.filter((x) => x.name.toLowerCase().includes(q)).length === 1 ? all.find((x) => x.name.toLowerCase().includes(q)) : null);
+    if (!m) { const n = all.filter((x) => x.name.toLowerCase().includes(q)).length; toast(n ? `${n} exercises match “${t.value.trim()}”. Pick one from the list as you type.` : `No exercise matches “${t.value.trim()}”.`); return; }
+    client(t.dataset.c).maxes[m.id] = client(t.dataset.c).maxes[m.id] || {}; save(); route(); toast(`Tracking ${m.name}.`); return;
+  }
   if (t.id === "mx-tpl" && t.value) { const c = client(t.dataset.c), tp = db.maxTemplates.find((x) => x.id === t.value); for (const id of tp.lifts) c.maxes[id] = c.maxes[id] || {}; save(); route(); return; }
   if (t.id === "from-tpl" && t.value) { const src = prog(t.value), np = clone(src); np.id = pid(); np.clientId = t.dataset.c; np.template = false; np.coach = me().name; db.programs.push(np); save(); UI.day = 0; location.hash = "#program-" + np.id; toast("Copied. Set the start date and adjust anything for this client."); return; }
   if (t.id === "cal-extra") { UI.calExtra = t.checked; route(); return; }

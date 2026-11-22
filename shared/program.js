@@ -134,8 +134,16 @@
   // Days without a day of the week (common in imported programs) still land on the calendar: they follow each
   // other from the start date in their order, so Day 1 is on the start date, Day 2 the next day, and so on,
   // skipping days of the week other days already have.
-  function autoOffset(program, day) {
-    const start = new Date(program.startDate + "T12:00:00").getDay(), days = program.days || [];
+  const SKIP_RE = /^(skip|off|none|n\/a|-+|—)$/i;
+  // Does this day have a workout in week w? (exercises that week, or a day that's only warm-up/cool-down)
+  function dayActive(day, w) {
+    const bl = day.blocks || [];
+    if (!bl.length) return !!(day.warmup || day.cooldown);
+    return bl.some((b) => { const c = String((b.weeks || [])[w] || "").trim(); return c && !SKIP_RE.test(c); });
+  }
+  function autoOffset(program, day, w) {
+    const start = new Date(program.startDate + "T12:00:00").getDay(), all = program.days || [];
+    const days = w == null ? all : all.filter((d) => d.weekday != null || d === day || dayActive(d, w)); // only that week's workouts share out the open days
     const taken = new Set(days.filter((d) => d.weekday != null).map((d) => (d.weekday - start + 7) % 7));
     const open = [0, 1, 2, 3, 4, 5, 6].filter((o) => !taken.has(o)); if (!open.length) open.push(0, 1, 2, 3, 4, 5, 6);
     const i = days.filter((d) => d.weekday == null).findIndex((d) => d === day || (d.id && d.id === day.id));
@@ -145,7 +153,7 @@
     if (program.schedule !== "weekly" || !program.startDate) return null;
     const start = new Date(program.startDate + "T12:00:00");
     if (isNaN(start)) return null;
-    const toWeekday = day.weekday == null ? autoOffset(program, day) : (day.weekday - start.getDay() + 7) % 7;
+    const toWeekday = day.weekday == null ? autoOffset(program, day, w) : (day.weekday - start.getDay() + 7) % 7;
     const d = new Date(start.getTime() + (w * 7 + toWeekday) * 864e5);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }
@@ -157,6 +165,8 @@
     const m = program && program.moves; if (!m || (program.schedule !== "weekly" && program.schedule !== "dated")) return null;
     const v = m[moveKey(w, day)]; return typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null;
   }
+  // A day counts as a workout in a week only if it has exercises that week. Warm-up or cool-down text alone counts
+  // only for a day with no exercises at all (a mobility day); otherwise imported days showed up empty every week.
   // Turns a coach program (v2) into the week-by-week list the client app runs.
   function compile(program) {
     if (!program || program.v !== 2) return program; // older programs are already in week form
@@ -171,7 +181,7 @@
           // Cells that aren't all shorthand are shown word for word; whatever could be read still sets up the logging rows.
           return { ex: b.ex, warmup: b.warmup || "", text: rx.errors.length || rx.loose ? cell.trim() : "", groups: rx.groups, tempo: rx.tempo, pause: rx.pause, rest: b.rest || 0, note: [b.note, wn].filter(Boolean).join(" "), group: b.group || null, video: b.video || "", fields: b.fields || null, format: b.format || null, warmupSets: !!b.warmupSets, sets: rx.groups.reduce((n, g) => n + g.sets, 0) };
         }).filter(Boolean),
-      })).filter((d) => (d.items.length || d.warmup || d.cooldown) && (program.schedule !== "dated" || d.date) && !d.off); // a "dated" program only runs the workouts put on the calendar
+      })).filter((d, i) => (d.items.length || (!(program.days[i].blocks || []).length && (d.warmup || d.cooldown))) && (program.schedule !== "dated" || d.date) && !d.off); // a "dated" program only runs the workouts put on the calendar
       weeks.push({ note: (program.weekNotes || [])[w] || "", days });
     }
     return { warmupDefault: program.warmupDefault || null, id: program.id, name: program.name, coach: program.coach, schedule: program.schedule, startDate: program.startDate, sample: !!program.sample, maxes: program.maxes || null, weeks };
@@ -237,7 +247,7 @@
   // **bold** in coach notes; everything else is escaped.
   const richText = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>");
 
-  const api = { isOff, WARMUP_DEFAULT, warmupDefaultOf, parseWarmup, warmupPlan, moveKey, movedDate, parsePrescription, parseLoad, prescriptionText, groupText, loadText, formatText, compile, dayDate, mmss, WEEKDAYS, ceilTo, roundStep, est1RM, targetOf, pctOf, richText };
+  const api = { dayActive, isOff, WARMUP_DEFAULT, warmupDefaultOf, parseWarmup, warmupPlan, moveKey, movedDate, parsePrescription, parseLoad, prescriptionText, groupText, loadText, formatText, compile, dayDate, mmss, WEEKDAYS, ceilTo, roundStep, est1RM, targetOf, pctOf, richText };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   root.PPProgram = api;
 })(typeof window !== "undefined" ? window : globalThis);
