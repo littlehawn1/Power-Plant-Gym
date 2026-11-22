@@ -75,7 +75,7 @@
         const reps = { single: 1, double: 2, triple: 3 }[m[1].toLowerCase()] || +(m[2] || m[3]);
         out.groups.push({ sets: 1, reps, label: "build to a heavy " + ({ 1: "single", 2: "double", 3: "triple" }[reps] || reps + "RM"), build: true }); out.loose = true; continue;
       }
-      if ((m = seg.match(/^tempo\s*[:\s]\s*(.+)$/i))) { out.tempo = m[1].trim(); continue; }
+      if ((m = seg.match(/^tempo\s*[:\s]\s*([0-9xX]{1,4}(?:\s*[-–]\s*[0-9xX]{1,2}){0,3}(?:\s*(?:s|sec|secs|seconds|count|ct))?)$/i))) { out.tempo = m[1].trim(); continue; } // a tempo like 3010, 31X0 or 3-1-1, not a sentence that starts with "tempo"
       if ((m = seg.match(/^pause\b\s*(.*)$/i))) { out.pause = m[1].trim() || "pause"; continue; }
       const lab = seg.match(/\(([^)]*)\)/); if (lab) { label = lab[1].trim(); seg = seg.replace(lab[0], "").trim(); }
       let main = seg, loadTxt = "";
@@ -179,7 +179,11 @@
           const rx = parsePrescription(cell);
           const wn = (b.weekNotes || [])[w] || "";
           // Cells that aren't all shorthand are shown word for word; whatever could be read still sets up the logging rows.
-          return { ex: b.ex, warmup: b.warmup || "", text: rx.errors.length || rx.loose ? cell.trim() : "", groups: rx.groups, tempo: rx.tempo, pause: rx.pause, rest: b.rest || 0, note: [b.note, wn].filter(Boolean).join(" "), group: b.group || null, video: b.video || "", fields: b.fields || null, format: b.format || null, warmupSets: !!b.warmupSets, sets: rx.groups.reduce((n, g) => n + g.sets, 0) };
+          // A coach can set the exact sets for one day (b.rows[w]) and its warm-up (b.wu[w]) from the calendar.
+          // The client still reads the coach's text; the app logs these sets and warm-ups.
+          const rowsTxt = String((b.rows || [])[w] || "").trim(), rr = rowsTxt ? parsePrescription(rowsTxt) : null, lg = rr && rr.groups.length ? rr : rx;
+          const wuTxt = String((b.wu || [])[w] || "").trim();
+          return { ex: b.ex, warmup: wuTxt || b.warmup || "", text: rx.errors.length || rx.loose ? cell.trim() : "", groups: lg.groups, tempo: rx.tempo, pause: rx.pause, rest: b.rest || 0, note: [b.note, wn].filter(Boolean).join(" "), group: b.group || null, video: b.video || "", fields: b.fields || null, format: b.format || null, warmupSets: wuTxt ? !/^(none|no|off|skip)$/i.test(wuTxt) : !!b.warmupSets, sets: lg.groups.reduce((n, g) => n + g.sets, 0) };
         }).filter(Boolean),
       })).filter((d, i) => (d.items.length || (!(program.days[i].blocks || []).length && (d.warmup || d.cooldown))) && (program.schedule !== "dated" || d.date) && !d.off); // a "dated" program only runs the workouts put on the calendar
       weeks.push({ note: (program.weekNotes || [])[w] || "", days });

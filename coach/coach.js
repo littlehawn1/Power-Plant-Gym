@@ -777,18 +777,21 @@ const BAR = 45;
 // Text for one load or rep target, written the way the program cells are typed (so it reads back the same).
 const loadTok = (L) => !L ? "" : L.t === "pct" ? `${L.v}%` : L.t === "lb" ? `${L.v}` : L.t === "kg" ? `${L.v} kg` : L.t === "top" ? `${L.v}% of todays top` : L.t === "rpe" ? `RPE ${L.v}` : L.t === "rir" ? `RIR ${L.v}` : L.t === "bw" ? "bw" : "";
 const repTok = (g) => (g.amrap && !g.reps ? "AMRAP" : g.amrap ? `${g.reps}+` : g.repsMax ? `${g.reps}-${g.repsMax}` : `${g.reps}`) + (g.per ? `/${g.per}` : "");
+const SKIPC = /^(skip|off|none|n\/a|-+|—)$/i, NOWU = /^\s*(none|no|off|skip)\s*$/i;
+// One exercise in a scheduled workout: the warm-up and every working set, each with editable reps and weight.
 function setsFor(text, ex, c, b, p, bi) {
-  const t = String(text || "").trim();
+  const t = String(text || "").trim(), w = UI.sess ? +UI.sess.split("|")[1] : 0;
   if (!t) return `<div class="ss sub">Nothing for this exercise this day.</div>`;
-  if (/^(skip|off|none|n\/a|-+|—)$/i.test(t)) return `<div class="ss sub">Skipped this day.</div>`;
-  const r = P.parsePrescription(t), max = c && c.maxes && c.maxes[ex] ? P.targetOf(c.maxes[ex], UNITS) : 0;
-  // Sets can be edited number by number when the line is plain sets × reps (not timed, a build-up, or free text).
-  const editable = bi != null && r.groups.length && !r.errors.length && !r.loose && r.groups.every((g) => !g.time && !g.dist && !g.capped && !g.build && (g.reps || g.amrap));
+  if (SKIPC.test(t)) return `<div class="ss sub">Skipped this day.</div>`;
+  const tr = P.parsePrescription(t), rowsTxt = bi != null ? String((b.rows || [])[w] || "").trim() : "";
+  const r = rowsTxt ? P.parsePrescription(rowsTxt) : tr, asText = tr.errors.length || tr.loose || !tr.groups.length;
+  const max = c && c.maxes && c.maxes[ex] ? P.targetOf(c.maxes[ex], UNITS) : 0;
+  const editable = bi != null && r.groups.every((g) => !g.time && !g.dist && !g.capped && !g.build);
   const rows = []; let n = 0, top = 0, missingMax = false;
   for (const g of r.groups) {
     const reps = g.capped ? `AMRAP in ${mmss(g.time)}` : g.time ? mmss(g.time) : g.dist ? `${g.dist} ${g.distUnit || ""}` : g.amrap ? (g.reps ? `${g.reps}+ reps` : "as many reps as possible") : `${g.reps}${g.repsMax ? "–" + g.repsMax : ""} rep${g.reps === 1 && !g.repsMax ? "" : "s"}`;
     let wt = "", calc = "", hint = "", L = g.load;
-    if (L && L.t === "pct") { if (max) { const w = P.pctOf(max, L.v, UNITS); calc = w; wt = `<b>${w} lb</b> <span class="sub">(${L.v}% of ${max})</span>`; hint = `${L.v}% of ${max}`; top = Math.max(top, w); } else { wt = `${L.v}% <span class="flagtxt">— no max set</span>`; hint = `${L.v}% · no max`; missingMax = true; } }
+    if (L && L.t === "pct") { if (max) { const x = P.pctOf(max, L.v, UNITS); calc = x; wt = `<b>${x} lb</b> <span class="sub">(${L.v}% of ${max})</span>`; hint = `${L.v}% of ${max}`; top = Math.max(top, x); } else { wt = `${L.v}% <span class="flagtxt">— no max set</span>`; hint = `${L.v}% · no max`; missingMax = true; } }
     else if (L && (L.t === "lb" || L.t === "kg")) { calc = L.v; wt = `<b>${L.v} ${L.t}</b>`; top = Math.max(top, L.t === "lb" ? L.v : 0); hint = max && L.t === "lb" ? `${Math.round((L.v / max) * 100)}% of ${max}` : ""; }
     else if (L && L.t === "top") { wt = `${L.v}% of the day’s top set`; hint = wt; }
     else if (L && L.t === "rpe") { wt = `RPE ${L.v}`; hint = wt; }
@@ -799,16 +802,29 @@ function setsFor(text, ex, c, b, p, bi) {
       n++;
       rows.push(editable
         ? `<div class="ssr ed" data-row="${bi}" data-load="${esc(loadTok(L))}" data-calc="${calc}" data-label="${i === 0 && g.label ? esc(g.label) : ""}"><span class="sub num">Set ${n}</span>
-            <span><input class="in num ss-in" data-ss="r" value="${esc(repTok(g))}" aria-label="Set ${n} reps" size="4"> reps</span>
-            <span><input class="in num ss-in" data-ss="w" inputmode="decimal" value="${calc}" placeholder="${esc(L && !calc ? (L.t === "rpe" ? "RPE " + L.v : L.t === "top" ? L.v + "% top" : L.t === "pct" ? L.v + "%" : "") : "weight")}" aria-label="Set ${n} weight" size="5"> lb ${hint ? `<span class="sub">${esc(hint)}</span>` : ""}${i === 0 && g.label ? ` <span class="sub">(${esc(g.label)})</span>` : ""}</span></div>`
+            <span><input class="in num ss-in" data-ss="r" value="${esc(g.reps || g.amrap ? repTok(g) : "")}" placeholder="reps" aria-label="Set ${n} reps" size="4"> reps</span>
+            <span><input class="in num ss-in" data-ss="w" inputmode="decimal" value="${calc}" placeholder="${esc(L && !calc ? (L.t === "rpe" ? "RPE " + L.v : L.t === "top" ? L.v + "% top" : L.t === "pct" ? L.v + "%" : "") : "weight")}" aria-label="Set ${n} weight" size="5"> lb ${hint ? `<span class="sub">${esc(hint)}</span>` : ""}${i === 0 && g.label ? ` <span class="sub">(${esc(g.label)})</span>` : ""}</span>
+            <button class="icon ss-x" data-act="ss-del" title="Remove this set" aria-label="Remove set ${n}">×</button></div>`
         : `<div class="ssr"><span class="sub num">Set ${n}</span><span>${reps}${g.per ? " each " + esc(g.per) : ""}</span><span>${wt}</span></div>`);
     }
   }
-  const wu = b && (b.warmupSets || (b.warmup && !/^\s*(none|no|off|skip)\s*$/i.test(b.warmup))) && top ? P.warmupPlan({ work: top, bar: BAR, max, step: 5, def: db.warmupDefault, custom: b.warmup }) : [];
-  const head = r.errors.length || r.loose ? `<div class="sub">Shown to the client as written. Rows below are what the app sets up to log. Change the line above to change them.</div>` : editable ? `<div class="sub">Change any set’s reps or weight. A weight you type replaces the % for that set; ${max ? "the % of their max shows beside it." : "add their max to see the %."}</div>` : "";
-  return `<div class="ss">${head}${wu.length ? `<div class="ssr wu"><span class="sub">Warm-up</span><span class="num">${esc(wu.map((x) => `${x.w}×${x.r}`).join(", "))}</span><span class="sub">${BAR} lb bar</span></div>` : ""}${rows.join("") || `<div class="sub">Logs 1 set.</div>`}${missingMax ? `<div class="flagtxt">Add their max for this lift (Maxes, on their page) so the app can work out the weight.</div>` : ""}</div>`;
+  // Warm-up: this day's own list if a coach set one, else the lift's setting / gym default.
+  let wuHTML = "";
+  if (bi != null && editable) {
+    const dayWu = String((b.wu || [])[w] || "").trim(), on = dayWu ? !NOWU.test(dayWu) : !!(b.warmupSets || (b.warmup && !NOWU.test(b.warmup)));
+    const plan = on && top ? P.warmupPlan({ work: top, bar: BAR, max, step: 5, def: db.warmupDefault, custom: dayWu || b.warmup }) : on && dayWu ? P.warmupPlan({ work: 0, custom: dayWu }) : [];
+    wuHTML = `<div class="wu-box"><div class="row"><label class="sub" style="display:flex;gap:6px;align-items:center"><input type="checkbox" class="wu-on" data-row="${bi}" ${on ? "checked" : ""}> <b>Warm-up sets</b></label><span class="grow"></span>${dayWu ? `<button class="btn small ghost" data-act="wu-auto" data-row="${bi}">Back to automatic</button>` : on ? `<span class="sub">automatic, from ${top ? top + " lb" : "the working weight"} (${BAR} lb bar)</span>` : ""}</div>
+      ${on ? plan.map((x, k) => `<div class="ssr wu ed-wu" data-row="${bi}"><span class="sub num">W${k + 1}</span><span><input class="in num wu-in" data-wu="r" value="${x.r}" size="4"> reps</span><span><input class="in num wu-in" data-wu="w" inputmode="decimal" value="${x.w}" size="5"> lb${max ? ` <span class="sub">${Math.round((x.w / max) * 100)}%</span>` : ""}</span><button class="icon ss-x" data-act="wu-del" title="Remove this warm-up set">×</button></div>`).join("") + `<button class="btn small ghost" data-act="wu-add" data-row="${bi}">+ Warm-up set</button>${!plan.length && !top ? `<span class="sub"> Needs a working weight to work them out.</span>` : ""}` : ""}</div>`;
+  } else if (bi == null || !editable) {
+    const wu = b && (b.warmupSets || (b.warmup && !NOWU.test(b.warmup))) && top ? P.warmupPlan({ work: top, bar: BAR, max, step: 5, def: db.warmupDefault, custom: b.warmup }) : [];
+    if (wu.length) wuHTML = `<div class="ssr wu"><span class="sub">Warm-up</span><span class="num">${esc(wu.map((x) => `${x.w}×${x.r}`).join(", "))}</span><span class="sub">${BAR} lb bar</span></div>`;
+  }
+  const head = asText && editable ? `<div class="sub">The client reads your text above as written.${rowsTxt ? ` These sets are what their app logs for this day <button class="btn small ghost" data-act="ss-reset" data-row="${bi}">Use the sets from the text</button>` : " Below is what their app sets up to log; change any number, or remove sets that aren’t working sets."}</div>`
+    : asText ? `<div class="sub">Shown to the client as written. Change the line above to change these.</div>`
+    : editable ? `<div class="sub">Change any set’s reps or weight. A weight you type replaces the % for that set${max ? "; the % of their max shows beside it" : ""}.</div>` : "";
+  return `<div class="ss">${head}${wuHTML}<div class="ss-work">${rows.join("") || `<div class="sub">Logs 1 set.</div>`}${editable ? `<button class="btn small ghost" data-act="ss-add" data-row="${bi}">+ Set</button>` : ""}</div>${missingMax ? `<div class="flagtxt">Add their max for this lift (Maxes, on their page) so the app can work out the weight.</div>` : ""}</div>`;
 }
-// Turn the edited set rows back into a program line, e.g. "1x3 @ 200 (top set), 3x4 @ 75%, tempo 3010".
+// Turn the edited set rows back into a line, e.g. "1x3 @ 200 (top set), 3x4 @ 75%, tempo 3010".
 function rowsToLine(bi, oldText) {
   const r = P.parsePrescription(oldText || ""), parts = [];
   for (const row of document.querySelectorAll(`.ssr.ed[data-row="${bi}"]`)) {
@@ -820,27 +836,40 @@ function rowsToLine(bi, oldText) {
     else parts.push({ n: 1, reps, load, label });
   }
   const line = parts.map((x) => `${x.n}x${x.reps}${x.load ? " @ " + x.load : ""}${x.label ? ` (${x.label})` : ""}`);
-  if (r.tempo) line.push(`tempo ${r.tempo}`); if (r.pause) line.push(`pause ${r.pause}`);
+  if (line.length && r.tempo) line.push(`tempo ${r.tempo}`); if (line.length && r.pause) line.push(`pause ${r.pause}`);
   return line.join(", ");
 }
+const wuToLine = (bi) => [...document.querySelectorAll(`.ed-wu[data-row="${bi}"]`)].map((row) => { const w = +row.querySelector('[data-wu="w"]').value, r = Math.round(+row.querySelector('[data-wu="r"]').value) || 5; return w >= 0 && isFinite(w) ? `${w}x${r}` : ""; }).filter(Boolean).join(", ") || "none";
+// The block being edited in the open workout box, plus helpers to save its day's sets or warm-up and redraw it.
+function sessBlock(bi) { const [pid, ws, did] = UI.sess.split("|"), p2 = prog(pid), day2 = p2 && p2.days.find((x) => x.id === did); return day2 ? { p2, w: +ws, b: day2.blocks[bi] } : {}; }
+function sessSaveSets(bi) {
+  const { p2, w, b } = sessBlock(bi); if (!b) return;
+  const cell = (b.weeks || [])[w] || "", tr = P.parsePrescription(cell), asText = tr.errors.length || tr.loose || !tr.groups.length;
+  const line = rowsToLine(bi, (b.rows || [])[w] || cell);
+  if (asText) { b.rows = b.rows || []; b.rows[w] = line || "1x1"; } // keep the coach's text; log these sets
+  else { b.weeks = b.weeks || []; while (b.weeks.length < p2.weeks) b.weeks.push(""); b.weeks[w] = line; const inp = document.querySelector(`[data-sess="${bi}"]`); if (inp) inp.value = line; }
+  save(); sessRedraw(bi);
+}
+function sessSaveWu(bi, text) { const { w, b } = sessBlock(bi); if (!b) return; b.wu = b.wu || []; if (text == null) { b.wu[w] = ""; if (!b.wu.some(Boolean)) delete b.wu; } else b.wu[w] = text; save(); sessRedraw(bi); }
+function sessRedraw(bi) { const { p2, w, b } = sessBlock(bi); const box = $("#ss-" + bi); if (box && b) box.innerHTML = setsFor((b.weeks || [])[w] || "", b.ex, client(p2.clientId), b, p2, bi); }
 function sessionHTML(drag) {
   const [pid, ws, did] = drag.split("|"), w = +ws, p = prog(pid), day = p && p.days.find((x) => x.id === did); if (!day) return "";
   const c = client(p.clientId), cday = (P.compile(p).weeks[w] || { days: [] }).days.find((x) => x.id === did), date = cday && cday.date;
   const labels = groupLabels(day.blocks);
   const inDay = (b) => { const c = ((b.weeks || [])[w] || "").trim(); return c && !/^(skip|off|none|n\/a|-+|—)$/i.test(c); };
   const hidden = day.blocks.filter((b) => !inDay(b)).length;
-  const rows = day.blocks.map((b, bi) => {
+  const box = (b, bi) => {
     const cell = (b.weeks || [])[w] || "", m = exMeta(b.ex), lab = labels[bi];
-    if (!inDay(b) && !UI.sessAll) return "";
     return `<div class="sess-ex${cell.trim() ? "" : " off"}"><div class="row"><b class="grow">${lab ? `<span class="glabel">${esc(lab.label)}</span> ` : ""}${esc(m.name)}</b>${b.rest ? `<span class="sub">rest ${mmss(b.rest)}</span>` : ""}</div>
       <input class="in" data-sess="${bi}" value="${esc(cell)}" placeholder="e.g. 3x5 @80% · 4x8 @135 · 3x10 @RPE8 · blank = not this day">
       <div id="ss-${bi}">${setsFor(cell, b.ex, c, b, p, bi)}</div></div>`;
-  }).join("");
+  };
+  const rows = day.blocks.map((b, bi) => (inDay(b) ? box(b, bi) : "")).join(""), others = day.blocks.map((b, bi) => (inDay(b) ? "" : box(b, bi))).join("");
   return `<div class="row"><div class="grow"><div class="eyebrow">${esc(c ? c.name : "")}${date ? " · " + esc(dateLabel(date)) : ""}</div><h2>Week ${w + 1} · ${esc(day.name || "Workout")}</h2></div><button class="btn small ghost" data-act="modal-close">Done</button></div>
     <p class="sub">What ${esc(c ? c.name : "the client")} will see, with weights worked out from their maxes. Change any line and it updates for <b>this day only</b> (week ${w + 1} of “${esc(p.name)}”). Changes save as you type.</p>
     ${day.note ? `<div class="cnote">${P.richText(day.note)}</div>` : ""}${day.warmup ? `<div class="cnote"><b>Warm-up:</b> ${P.richText(day.warmup)}</div>` : ""}
-    ${hidden ? `<label class="sess-toggle sub"><input type="checkbox" id="sess-all" ${UI.sessAll ? "checked" : ""}> Show exercises that aren’t part of this day’s workout (${hidden})</label>` : ""}
-    <div class="sess">${rows || `<div class="empty">No exercises are programmed for this day in week ${w + 1}.${hidden ? " Tick the box above to see the day’s other exercises and fill one in, or remove this workout from the calendar below." : ""}</div>`}</div>
+    <div class="sess">${rows || `<div class="empty">No exercises are programmed for this day in week ${w + 1}.${hidden ? " Open the list below to fill one in, or remove this workout from the calendar." : ""}</div>`}</div>
+    ${hidden ? `<details class="sess-more" id="sess-more" ${UI.sessAll ? "open" : ""}><summary>${hidden} other exercise${hidden === 1 ? "" : "s"} in “${esc(day.name || "this day")}” that ${hidden === 1 ? "isn’t" : "aren’t"} programmed for week ${w + 1}</summary><div class="sess">${others}</div></details>` : ""}
     ${day.cooldown ? `<div class="cnote"><b>Cool-down:</b> ${P.richText(day.cooldown)}</div>` : ""}
     <div class="row sess-foot"><label class="f">Date<input class="in" type="date" id="mv-date" value="${date || ""}" data-drag="${esc(drag)}"></label><button class="btn" data-act="mv-save">Move to this date</button><button class="btn danger" data-act="mv-off">Remove from calendar</button><span class="grow"></span><a class="btn small ghost" href="#program-${p.id}" data-act="sess-prog" data-d="${p.days.indexOf(day)}" data-w="${w}" style="text-decoration:none">Open the whole program</a></div>`;
 }
@@ -913,6 +942,7 @@ function schedApply() {
   toast(`Added ${plan.length} workout${plan.length === 1 ? "" : "s"} to ${client(S.cid).name}’s calendar.`);
 }
 
+document.addEventListener("toggle", (ev) => { if (ev.target && ev.target.id === "sess-more") UI.sessAll = ev.target.open; }, true); // keep "other exercises" open or shut between workouts
 // Drag and drop on the client calendar.
 let dragKey = null;
 document.addEventListener("dragstart", (ev) => { const el = ev.target.closest && ev.target.closest("[data-drag]"); if (!el) return; dragKey = el.dataset.drag; ev.dataTransfer.effectAllowed = "move"; try { ev.dataTransfer.setData("text/plain", dragKey); } catch {} el.classList.add("dragging"); });
@@ -981,6 +1011,14 @@ document.addEventListener("click", (ev) => {
       removedProg = db.programs[i]; db.programs.splice(i, 1); UI.confirm = null; save(); route();
       toast(`Removed “${removedProg.name}”.`, { act: "prog-restore", label: "Undo" }); break; }
     case "prog-restore": if (removedProg) { db.programs.push(removedProg); removedProg = null; save(); route(); $("#toast").hidden = true; } break;
+    case "ss-del": { const row = t.closest(".ssr"), bi = +row.dataset.row; row.remove(); sessSaveSets(bi); break; }
+    case "ss-add": { const bi = +t.dataset.row, rows = document.querySelectorAll(`.ssr.ed[data-row="${bi}"]`), last = rows[rows.length - 1];
+      if (last) { const cp = last.cloneNode(true); cp.dataset.label = ""; last.after(cp); } else { const { b } = sessBlock(bi); b.rows = b.rows || []; } sessSaveSets(bi); break; }
+    case "ss-reset": { const bi = +t.dataset.row, { w, b } = sessBlock(bi); if (b && b.rows) { b.rows[w] = ""; if (!b.rows.some(Boolean)) delete b.rows; save(); sessRedraw(bi); } break; }
+    case "wu-del": { const row = t.closest(".ssr"), bi = +row.dataset.row; row.remove(); sessSaveWu(bi, wuToLine(bi)); break; }
+    case "wu-add": { const bi = +t.dataset.row, rows = document.querySelectorAll(`.ed-wu[data-row="${bi}"]`), last = rows[rows.length - 1];
+      sessSaveWu(bi, [wuToLine(bi), last ? `${+last.querySelector('[data-wu="w"]').value + 20}x3` : "45x5"].filter((x) => x && x !== "none").join(", ")); break; }
+    case "wu-auto": sessSaveWu(+t.dataset.row, null); break;
     case "wk-open": UI.sess = t.dataset.drag; openModal(`<div id="sess-box">${sessionHTML(t.dataset.drag)}</div>`); break;
     case "sess-prog": UI.day = +t.dataset.d; UI.previewWeek = +t.dataset.w; closeModal(); break;
     case "log-open": { const l = db.logs.find((x) => x.id === t.dataset.l); if (l) openModal(`<div class="row"><h2 class="grow">Logged workout</h2><button class="btn small ghost" data-act="modal-close">Close</button></div>${logCardHTML(l)}`); break; }
@@ -1064,7 +1102,7 @@ document.addEventListener("input", (ev) => {
   if (t.dataset.sess != null && UI.sess) { // edit one exercise for one scheduled day
     const [pid, ws, did] = UI.sess.split("|"), p2 = prog(pid), day2 = p2 && p2.days.find((x) => x.id === did), b = day2 && day2.blocks[+t.dataset.sess]; if (!b) return;
     b.weeks = b.weeks || []; while (b.weeks.length < p2.weeks) b.weeks.push(""); b.weeks[+ws] = t.value; save();
-    const box = $("#ss-" + t.dataset.sess); if (box) box.innerHTML = setsFor(t.value, b.ex, client(p2.clientId), b, p2, +t.dataset.sess);
+    sessRedraw(+t.dataset.sess);
     t.closest(".sess-ex").classList.toggle("off", !t.value.trim()); return;
   }
   if (t.id === "ex-q") { UI.exQ = t.value; $("#ex-list").innerHTML = exListHTML(); return; }
@@ -1085,14 +1123,13 @@ document.addEventListener("change", (ev) => {
   const t = ev.target, p = cur() ? prog(cur()) : null;
   if (t.id === "me") { if (db.cloud) return; db.me = t.value; save(); route(); return; }
   if (t.id === "sc-src" && UI.sched) { UI.sched.src = t.value; UI.sched.sel = new Set(); const p2 = prog(t.value), wds = [...new Set(p2.days.map((d) => d.weekday).filter((x) => x != null))]; if (wds.length) UI.sched.wds = wds; schedRedraw(); return; }
-  if (t.classList && t.classList.contains("ss-in") && UI.sess) {
-    const row = t.closest(".ssr.ed"), bi = +row.dataset.row, [pid, ws, did] = UI.sess.split("|"), p2 = prog(pid), day2 = p2 && p2.days.find((x) => x.id === did), b = day2 && day2.blocks[bi]; if (!b) return;
-    const line = rowsToLine(bi, (b.weeks || [])[+ws]); b.weeks = b.weeks || []; while (b.weeks.length < p2.weeks) b.weeks.push(""); b.weeks[+ws] = line; save();
-    const inp = document.querySelector(`[data-sess="${bi}"]`); if (inp) inp.value = line;
-    const box = $("#ss-" + bi); if (box) box.innerHTML = setsFor(line, b.ex, client(p2.clientId), b, p2, bi);
-    return;
-  }
-  if (t.id === "sess-all" && UI.sess) { UI.sessAll = t.checked; $("#sess-box").innerHTML = sessionHTML(UI.sess); return; }
+  if (t.classList && t.classList.contains("ss-in") && UI.sess) { sessSaveSets(+t.closest(".ssr").dataset.row); return; }
+  if (t.classList && t.classList.contains("wu-in") && UI.sess) { const bi = +t.closest(".ssr").dataset.row; sessSaveWu(bi, wuToLine(bi)); return; }
+  if (t.classList && t.classList.contains("wu-on") && UI.sess) { const bi = +t.dataset.row, { b } = sessBlock(bi);
+    if (!t.checked) sessSaveWu(bi, "none"); else if (b.warmupSets || (b.warmup && !NOWU.test(b.warmup))) sessSaveWu(bi, null); else { // switch on for this day: start from the gym's automatic warm-up for the heaviest set
+      const ws = [...document.querySelectorAll(`.ssr.ed[data-row="${bi}"] [data-ss="w"]`)].map((x) => +x.value || 0), top = Math.max(0, ...ws), c2 = client(sessBlock(bi).p2.clientId), m = c2 && c2.maxes[b.ex] ? P.targetOf(c2.maxes[b.ex], UNITS) : 0;
+      const plan = top ? P.warmupPlan({ work: top, bar: BAR, max: m, step: 5, def: db.warmupDefault }) : [];
+      sessSaveWu(bi, plan.length ? plan.map((x) => `${x.w}x${x.r}`).join(", ") : `${BAR}x5`); } return; }
   if (t.id === "sc-client" && UI.sched) { UI.sched.cid = t.value; schedRedraw(); return; }
   if (t.id === "sc-start" && UI.sched) { UI.sched.start = t.value; schedRedraw(); return; }
   if (t.classList && t.classList.contains("sc-wd") && UI.sched) { UI.sched.wds = [...document.querySelectorAll(".sc-wd:checked")].map((x) => +x.value); schedRedraw(); return; }

@@ -223,3 +223,10 @@ table.maxt { width: 100%; border-collapse: collapse; font-size: 14px; }
 .cal-extra { display: flex; align-items: center; gap: 6px; margin: 4px 0 8px; }
 .cw.extra { border-left-style: dashed; }
 .sess-toggle { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+.ssr.ed, .ssr.ed-wu { grid-template-columns: 60px minmax(0, 1fr) minmax(0, 1.6fr) 28px; }
+.ss-x { opacity: .5; } .ss-x:hover { opacity: 1; color: var(--bad); }
+.wu-box { border-bottom: 1px dashed var(--line); padding-bottom: 6px; margin-bottom: 4px; }
+.ed-wu .in { width: 4.5em; padding: 4px 6px; display: inline-block; }
+.sess-more { margin-top: 10px; border: 1px dashed var(--line); border-radius: 8px; padding: 8px 10px; }
+.sess-more summary { cursor: pointer; color: var(--muted, inherit); font-size: 14px; }
+.sess-more[open] summary { margin-bottom: 8px; }
