@@ -585,8 +585,9 @@ function renderTemplates() {
   setNav("templates");
   const t = db.programs.filter((p) => p.template);
   $("#view").innerHTML = `<div class="row"><div class="grow"><div class="eyebrow">Reusable programs you can copy to any client</div><h1>Saved programs</h1></div><label class="btn" style="cursor:pointer">Import programs file<input type="file" id="tplfile" accept=".json,application/json" hidden></label><button class="btn primary" data-act="tpl-new">+ New saved program</button></div>
-    <div class="plist">${t.map((p) => `<div class="pitem panel" style="flex-direction:row"><div class="grow"><b>${esc(p.name)}</b><div class="sub">${p.weeks} weeks · ${p.days.length} days/week</div></div><a class="btn small primary" href="#program-${p.id}" style="text-decoration:none">Edit</a><button class="btn small" data-act="prog-dup" data-id="${p.id}">Copy to a client…</button></div>`).join("") || `<div class="empty">No saved programs yet. Open any client’s program and choose <b>Save as a saved program</b>, or start a new one here.</div>`}</div>
-    ${UI.confirm && UI.confirm.startsWith("dup:") ? (() => { const dup = prog(UI.confirm.slice(4)); return `<div class="panel"><b>Copy “${esc(dup.name)}” to:</b><select class="in" id="dup-to">${db.clients.map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join("")}</select><div class="row"><button class="btn small primary" data-act="dup-yes" data-id="${dup.id}">Make a copy</button><button class="btn small ghost" data-act="cancel">Cancel</button></div></div>`; })() : ""}`;
+    <div class="plist">${t.map((p) => `<div class="pitem panel" style="flex-direction:column;align-items:stretch"><div class="row"><div class="grow"><b>${esc(p.name)}</b><div class="sub">${p.weeks} weeks · ${p.days.length} day${p.days.length === 1 ? "" : "s"}/week</div></div>
+        <a class="btn small" href="#program-${p.id}" style="text-decoration:none">Edit</a><button class="btn small primary" data-act="sched-open" data-src="${p.id}">Add workouts to a client…</button><button class="btn small" data-act="prog-dup" data-id="${p.id}">Copy whole program…</button></div>
+        ${UI.confirm === "dup:" + p.id ? `<div class="panel" style="background:var(--sunken)"><b>Copy all of “${esc(p.name)}” to:</b><select class="in" id="dup-to">${db.clients.map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join("")}</select><div class="row"><button class="btn small primary" data-act="dup-yes" data-id="${p.id}">Make a copy</button><button class="btn small ghost" data-act="cancel">Cancel</button></div><div class="sub">This copies every week and day. To give a client just some workouts, use “Add workouts to a client…”.</div></div>` : ""}</div>`).join("") || `<div class="empty">No saved programs yet.</div>`}</div>`;
 }
 
 function newProgram(cid) {
@@ -829,12 +830,13 @@ function removeSession(drag) {
 /* ---- Add workouts to a client's calendar (pick a program, tick workouts, pick days) ---- */
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const hasWorkout = (p, w, day) => (day.blocks || []).some((b) => { const c = ((b.weeks || [])[w] || "").trim(); return c && !/^(skip|off|none|n\/a|-+|—)$/i.test(c); }) || day.warmup || day.cooldown;
-function schedOpen(cid) {
+function schedOpen(cid, srcId) {
+  if (!cid) { if (!db.clients.length) { toast("Add a client first."); return; } cid = db.clients[0].id; }
   const own = programsOf(cid), tpls = db.programs.filter((p) => p.template);
-  const src = own[own.length - 1] || tpls[0]; if (!src) { toast("Make or import a program first."); return; }
+  const src = (srcId && prog(srcId)) || own[own.length - 1] || tpls[0]; if (!src) { toast("Make or import a program first."); return; }
   const wds = [...new Set(src.days.map((d) => d.weekday).filter((x) => x != null))];
   const n = new Date(); n.setDate(n.getDate() + ((8 - n.getDay()) % 7 || 7)); // next Monday
-  UI.sched = { cid, src: src.id, sel: new Set(), start: iso(n), wds: wds.length ? wds : [1, 3, 5] };
+  UI.sched = { cid, src: src.id, sel: new Set(), start: iso(n), wds: wds.length ? wds : [1, 3, 5], pick: !!srcId };
   openModal(`<div id="sched">${schedHTML()}</div>`);
 }
 function schedPlan() { // the ticked workouts in program order, each on the next training day
@@ -849,8 +851,9 @@ function schedHTML() {
   const opt = (x) => `<option value="${x.id}" ${x.id === S.src ? "selected" : ""}>${esc(x.name)}</option>`;
   const weeks = []; for (let w = 0; w < p.weeks; w++) { const ds = p.days.filter((day) => hasWorkout(p, w, day)); if (ds.length) weeks.push({ w, ds }); }
   const plan = schedPlan();
-  return `<div class="row"><h2 class="grow">Add workouts to ${esc(c.name)}’s calendar</h2><button class="btn small ghost" data-act="modal-close">Close</button></div>
+  return `<div class="row"><h2 class="grow">Add workouts to ${S.pick ? "a client’s" : esc(c.name) + "’s"} calendar</h2><button class="btn small ghost" data-act="modal-close">Close</button></div>
     <div class="form2">
+      ${S.pick ? `<label class="f" style="grid-column:1/-1">Client<select class="in" id="sc-client">${db.clients.map((x) => `<option value="${x.id}" ${x.id === S.cid ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>` : ""}
       <label class="f">From program<select class="in" id="sc-src">${own.length ? `<optgroup label="${esc(c.name)}’s programs">${own.map(opt).join("")}</optgroup>` : ""}${tpls.length ? `<optgroup label="Saved programs">${tpls.map(opt).join("")}</optgroup>` : ""}</select></label>
       <label class="f">First workout on or after<input class="in" type="date" id="sc-start" value="${S.start}"></label>
     </div>
@@ -875,7 +878,8 @@ function schedApply() {
     }
   }
   t.moves = t.moves || {}; for (const x of plan) t.moves[x.w + ":" + x.day.id] = x.date;
-  fixDatedStart(t); save(); closeModal(); UI.sched = null; UI.clientTab = "calendar"; UI.calMonth = plan[0].date.slice(0, 7); route();
+  fixDatedStart(t); save(); closeModal(); UI.sched = null; UI.clientTab = "calendar"; UI.calMonth = plan[0].date.slice(0, 7);
+  if (location.hash !== "#client-" + S.cid) location.hash = "#client-" + S.cid; else route();
   toast(`Added ${plan.length} workout${plan.length === 1 ? "" : "s"} to ${client(S.cid).name}’s calendar.`);
 }
 
@@ -902,7 +906,7 @@ document.addEventListener("click", (ev) => {
     case "reset-sample": db = seed(); save(); UI.confirm = null; renderTop(); route(); toast("Sample data reset."); break;
     case "prog-new": { const np = newProgram(t.dataset.c); UI.day = 0; location.hash = "#program-" + np.id; break; }
     case "prog-dup": UI.confirm = "dup:" + t.dataset.id; route(); break;
-    case "sched-open": schedOpen(t.dataset.c); break;
+    case "sched-open": schedOpen(t.dataset.c, t.dataset.src); break;
     case "sc-day": { const k = t.dataset.k; if (t.checked) UI.sched.sel.add(k); else UI.sched.sel.delete(k); schedRedraw(); break; }
     case "sc-week": { const w = +t.dataset.w, p2 = prog(UI.sched.src); for (const day of p2.days) if (hasWorkout(p2, w, day)) { const k = w + ":" + day.id; if (t.checked) UI.sched.sel.add(k); else UI.sched.sel.delete(k); } schedRedraw(); break; }
     case "sc-all": { const p2 = prog(UI.sched.src); if (UI.sched.sel.size) UI.sched.sel.clear(); else for (let w = 0; w < p2.weeks; w++) for (const day of p2.days) if (hasWorkout(p2, w, day)) UI.sched.sel.add(w + ":" + day.id); schedRedraw(); break; }
@@ -963,7 +967,8 @@ document.addEventListener("click", (ev) => {
     case "mv-save": case "mv-reset": { const inp = $("#mv-date"); moveSession(inp.dataset.drag, a === "mv-reset" ? null : inp.value); closeModal(); break; }
     case "dup-yes": {
       const src = prog(t.dataset.id), np = clone(src), to = $("#dup-to").value; np.id = pid(); np.coach = me().name; delete np.moves;
-      if (to === "__tpl") { np.clientId = null; np.template = true; np.name = src.name; } else { np.clientId = to; np.template = false; np.name = src.template ? src.name : src.name + " (copy)"; }
+      if (to === "__tpl") { np.clientId = null; np.template = true; np.name = src.name; } else { np.clientId = to; np.template = false; np.name = src.template ? src.name : src.name + " (copy)";
+        if (np.schedule !== "weekly") { np.schedule = "weekly"; const n = new Date(); n.setDate(n.getDate() + ((8 - n.getDay()) % 7 || 7)); np.startDate = iso(n); } } // so it lands on their calendar
       db.programs.push(np); save(); UI.confirm = null; location.hash = "#program-" + np.id; toast(to === "__tpl" ? "Saved to Saved programs." : `Copied to ${client(np.clientId).name}. Set the start date and adjust anything for them.`); break;
     }
     case "save-tpl": { const np = clone(p); np.id = pid(); delete np.moves; np.clientId = null; np.template = true; db.programs.push(np); save(); route(); toast(`“${p.name}” added to Saved programs.`); break; }
@@ -1050,6 +1055,7 @@ document.addEventListener("change", (ev) => {
   const t = ev.target, p = cur() ? prog(cur()) : null;
   if (t.id === "me") { if (db.cloud) return; db.me = t.value; save(); route(); return; }
   if (t.id === "sc-src" && UI.sched) { UI.sched.src = t.value; UI.sched.sel = new Set(); const p2 = prog(t.value), wds = [...new Set(p2.days.map((d) => d.weekday).filter((x) => x != null))]; if (wds.length) UI.sched.wds = wds; schedRedraw(); return; }
+  if (t.id === "sc-client" && UI.sched) { UI.sched.cid = t.value; schedRedraw(); return; }
   if (t.id === "sc-start" && UI.sched) { UI.sched.start = t.value; schedRedraw(); return; }
   if (t.classList && t.classList.contains("sc-wd") && UI.sched) { UI.sched.wds = [...document.querySelectorAll(".sc-wd:checked")].map((x) => +x.value); schedRedraw(); return; }
   if (t.id === "ex-f") { UI.exF = t.value; $("#ex-list").innerHTML = exListHTML(); return; }
