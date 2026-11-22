@@ -77,7 +77,7 @@ async function loadCloud() {
   const d = { v: 2, sample: false, cloud: true, me: meUser.id, coaches: [], clients: [], programs: [], logs: [], custom: {}, dayNotes: {} };
   for (const p of pf.data) {
     const name = p.name || p.email || "Unnamed";
-    if (p.role === "coach") d.coaches.push({ id: p.id, name });
+    if (p.role === "coach") { d.coaches.push({ id: p.id, name }); (d.coachProfiles = d.coachProfiles || []).push({ email: String(p.email || "").toLowerCase(), name: p.name || "" }); }
     else d.clients.push({ id: p.id, name, email: p.email, coachId: p.coach_id, remote: !!p.remote, notes: "", maxes: {} });
   }
   const cl = (id) => d.clients.find((x) => x.id === id);
@@ -570,10 +570,30 @@ function newExerciseModal() {
 /* ---- Gym settings ---- */
 const wuText = (plan) => plan.length ? plan.map((x) => `${fmtW(x.w)}×${x.r}`).join(", ") : "no warm-up sets";
 const fmtW = (w) => String(Math.round(w * 100) / 100);
+/* ---- Coaches: the coach email list (coach_emails). Adding an email makes that login a coach, removing makes it a client. ---- */
+async function loadCoachList() {
+  const el = $("#coach-list"); if (!el || !db.cloud) return;
+  const r = await Cloud.client().from("coach_emails").select("email").order("email");
+  if (r.error) { el.innerHTML = `<div class="flagtxt">Couldn’t load the coach list: ${esc(Cloud.friendly(r.error))}</div>`; return; }
+  const mine = String((meUser && meUser.email) || "").toLowerCase(), names = Object.fromEntries((db.coachProfiles || []).map((x) => [x.email, x.name]));
+  el.innerHTML = r.data.map((x) => `<div class="row coach-row"><span class="grow"><b>${esc(names[x.email] || x.email)}</b>${names[x.email] ? ` <span class="sub">${esc(x.email)}</span>` : ` <span class="sub">hasn’t signed in yet</span>`}</span>
+      ${x.email === mine ? `<span class="sub">you</span>` : UI.confirm === "uncoach:" + x.email ? `<span class="sub">Remove as coach?</span><button class="btn small danger" data-act="coach-rm-yes" data-e="${esc(x.email)}">Remove</button><button class="btn small ghost" data-act="coach-rm-no">Keep</button>` : `<button class="btn small ghost" data-act="coach-rm" data-e="${esc(x.email)}">Remove</button>`}</div>`).join("") || `<div class="sub">No coaches on the list.</div>`;
+}
+async function coachListChange(email, add) {
+  const c = Cloud.client(), r = add ? await c.from("coach_emails").insert({ email }) : await c.from("coach_emails").delete().eq("email", email);
+  const dup = r.error && add && /duplicate|unique/i.test(r.error.message || "");
+  if (r.error && !dup) { toast(`Couldn’t ${add ? "add" : "remove"} ${email}: ${Cloud.friendly(r.error)}`); return; }
+  UI.confirm = null; toast(dup ? `${email} is already a coach.` : add ? `${email} is now a coach. Send them the dashboard link.` : `${email} is no longer a coach. If they sign in, they’ll see the client app instead.`); loadCoachList();
+}
 function renderSettings() {
   setNav("settings");
   const d = db.warmupDefault, ex = (work, max, custom) => wuText(P.warmupPlan({ work, bar: 45, max, step: 5, def: d, custom }));
   $("#view").innerHTML = `<h1>Gym settings</h1>
+    ${db.cloud ? `<section class="panel" style="max-width:760px"><h2>Coaches</h2>
+      <p class="sub">Anyone who signs in to this dashboard with an email on this list is a coach and sees every client. Everyone else who signs up is a client.</p>
+      <div id="coach-list"><div class="sub">Loading…</div></div>
+      <form class="row" id="coach-add" style="margin-top:8px"><input class="in grow" id="coach-email" type="email" placeholder="New coach’s email" autocomplete="off" required><button class="btn primary">Add coach</button></form>
+      <p class="sub">Then send them the dashboard link (<a href="${esc(location.href.split("#")[0])}">${esc(location.href.split("#")[0])}</a>). They tap <b>Create an account</b> with that email, or just sign in if they already have one in the app.</p></section>` : ""}
     <section class="panel" style="max-width:760px"><h2>Warm-up sets</h2>
       <p class="sub">When a lift has warm-up sets turned on (in the program, under that exercise’s Settings), the client app fills them in before the first working set. The weights go up in even jumps from the empty bar to the working weight, rounded up to the nearest 5 lb.</p>
       <div class="form3">
@@ -589,6 +609,7 @@ function renderSettings() {
       </div>
       <p class="sub">To change one client’s warm-up for one lift, open their program, click the exercise, and write it under “Warm-up for this lift”: <b>start 95</b> (start there instead of the bar), <b>95x5, 105x5, 115x3</b> (exactly those), <b>bar x5, 50%x5, 75%x3</b> (% of the working weight), or <b>none</b>.</p>
     </section>`;
+  loadCoachList();
 }
 function renderTemplates() {
   setNav("templates");
@@ -1011,6 +1032,9 @@ document.addEventListener("click", (ev) => {
     case "prog-new": { const np = newProgram(t.dataset.c); UI.day = 0; location.hash = "#program-" + np.id; break; }
     case "prog-dup": UI.confirm = "dup:" + t.dataset.id; route(); break;
     case "preview-app": previewApp(t.dataset.c); break;
+    case "coach-rm": UI.confirm = "uncoach:" + t.dataset.e; loadCoachList(); break;
+    case "coach-rm-no": UI.confirm = null; loadCoachList(); break;
+    case "coach-rm-yes": coachListChange(t.dataset.e, false); break;
     case "sched-open": schedOpen(t.dataset.c, t.dataset.src); break;
     case "sc-day": { const k = t.dataset.k; if (t.checked) UI.sched.sel.add(k); else UI.sched.sel.delete(k); schedRedraw(); break; }
     case "sc-week": { const w = +t.dataset.w, p2 = prog(UI.sched.src); for (const day of p2.days) if (hasWorkout(p2, w, day)) { const k = w + ":" + day.id; if (t.checked) UI.sched.sel.add(k); else UI.sched.sel.delete(k); } schedRedraw(); break; }
@@ -1250,6 +1274,7 @@ function applySettings(p) {
   save();
 }
 document.addEventListener("submit", (ev) => {
+  if (ev.target.id === "coach-add") { ev.preventDefault(); const v = $("#coach-email").value.trim().toLowerCase(); if (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) { coachListChange(v, true); $("#coach-email").value = ""; } else toast("Enter an email address."); return; }
   if (ev.target.id !== "newclient") return; ev.preventDefault();
   const name = $("#nc-name").value.trim(); if (!name) return;
   const c = { id: uid("k"), name, email: $("#nc-email").value.trim(), coachId: $("#nc-coach").value, remote: $("#nc-remote").value === "1", notes: "" };
