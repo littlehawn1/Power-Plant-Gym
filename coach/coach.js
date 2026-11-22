@@ -419,7 +419,7 @@ function calendarHTML(c) {
     }
     for (const l of logs.filter((x) => !used.has(x.id) && x.date.slice(0, 10) === k)) { used.add(l.id); items.push({ title: l.name, status: "done", log: l }); }
     cells.push(`<div class="cday${inMonth ? "" : " out"}${k === today ? " today" : ""}" data-date="${k}"><div class="cd-hd"><span>${d.getDate()}</span><button class="flagbtn${notes[k] ? " on" : ""}" data-act="daynote" data-c="${c.id}" data-d="${k}" title="${notes[k] ? esc(notes[k]) : "Add a private note (only coaches see it)"}" aria-label="Private note for ${k}">⚑</button></div>
-      ${items.map((it) => `<div class="cw ${it.status}${it.drag ? " drag" : ""}"${it.drag ? ` draggable="true" data-drag="${it.drag}" data-act="wk-move" data-c="${c.id}" tabindex="0" role="button" title="Drag to another day to move it, or click to pick a date"` : ""}><b>${esc(it.title)}${it.moved ? ` <span class="moved" title="Moved from its usual day">↷</span>` : ""}</b>${it.drag ? `<button class="cw-x" data-act="wk-off" data-drag="${it.drag}" title="Remove from calendar" aria-label="Remove ${esc(it.title)} from the calendar">×</button>` : ""}${it.note ? `<div class="cwn">${esc(it.note)}</div>` : ""}
+      ${items.map((it) => `<div class="cw ${it.status}${it.drag ? " drag" : ""}"${it.drag ? ` draggable="true" data-drag="${it.drag}" data-act="wk-open" data-c="${c.id}" tabindex="0" role="button" title="Click to see and change this workout. Drag to move it."` : it.log ? ` data-act="log-open" data-l="${esc(it.log.id)}" tabindex="0" role="button" title="See what was logged"` : ""}><b>${esc(it.title)}${it.moved ? ` <span class="moved" title="Moved from its usual day">↷</span>` : ""}</b>${it.drag ? `<button class="cw-x" data-act="wk-off" data-drag="${it.drag}" title="Remove from calendar" aria-label="Remove ${esc(it.title)} from the calendar">×</button>` : ""}${it.note ? `<div class="cwn">${esc(it.note)}</div>` : ""}
         ${it.log ? (it.log.exercises || []).map((e) => `<div class="cx"><span class="ck ${(e.sets || []).length ? "y" : "n"}">${(e.sets || []).length ? "✓" : "✗"}</span><span>${esc(exMeta(e.ex).name)}<br><span class="sub num">${esc(setsText(e) || "–")}</span></span></div>`).join("")
           : (it.rx || []).map((x) => `<div class="cx"><span class="ck">${it.status === "missed" ? "✗" : "·"}</span><span>${esc(exMeta(x.ex).name)}</span></div>`).join("")}</div>`).join("")}
     </div>`);
@@ -698,7 +698,7 @@ function renderProgram(pid) {
 
 /* ---- Exercise picker and settings (modal) ---- */
 function openModal(html) { $("#modal").innerHTML = `<div class="modal-wrap" data-act="modal-bg"><div class="modal" role="dialog" aria-modal="true">${html}</div></div>`; }
-function closeModal() { $("#modal").innerHTML = ""; UI.picker = null; UI.editing = null; }
+function closeModal() { $("#modal").innerHTML = ""; UI.picker = null; UI.editing = null; UI.sess = null; }
 function pickerHTML(q) {
   const all = allEx();
   const lo = q.trim().toLowerCase();
@@ -771,6 +771,47 @@ function moveSession(drag, date) {
   if (pr.schedule === "dated") fixDatedStart(pr);
   save(); route();
   toast(date || usual ? `Moved ${dd.name} (week ${w + 1}) to ${dateLabel(date || usual)}.` : `Took ${dd.name} (week ${w + 1}) off the calendar.`, { act: "undo", label: "Undo" });
+}
+/* ---- One scheduled workout: the exact sets and weights this client will get, editable for that day ---- */
+const BAR = 45;
+function setsFor(text, ex, c, b, p) {
+  const t = String(text || "").trim();
+  if (!t) return `<div class="ss sub">Nothing for this exercise this day.</div>`;
+  if (/^(skip|off|none|n\/a|-+|—)$/i.test(t)) return `<div class="ss sub">Skipped this day.</div>`;
+  const r = P.parsePrescription(t), max = c && c.maxes && c.maxes[ex] ? P.targetOf(c.maxes[ex], UNITS) : 0;
+  const rows = []; let n = 0, top = 0, missingMax = false;
+  for (const g of r.groups) {
+    const reps = g.capped ? `AMRAP in ${mmss(g.time)}` : g.time ? mmss(g.time) : g.dist ? `${g.dist} ${g.distUnit || ""}` : g.amrap ? (g.reps ? `${g.reps}+ reps` : "as many reps as possible") : `${g.reps}${g.repsMax ? "–" + g.repsMax : ""} rep${g.reps === 1 && !g.repsMax ? "" : "s"}`;
+    let wt = "", L = g.load;
+    if (L && L.t === "pct") { if (max) { const w = P.pctOf(max, L.v, UNITS); wt = `<b>${w} lb</b> <span class="sub">(${L.v}% of ${max})</span>`; top = Math.max(top, w); } else { wt = `${L.v}% <span class="flagtxt">— no max set</span>`; missingMax = true; } }
+    else if (L && (L.t === "lb" || L.t === "kg")) { wt = `<b>${L.v} ${L.t}</b>`; top = Math.max(top, L.t === "lb" ? L.v : 0); }
+    else if (L && L.t === "top") wt = `${L.v}% of the day’s top set`;
+    else if (L && L.t === "rpe") wt = `RPE ${L.v}`;
+    else if (L && L.t === "bw") wt = "bodyweight";
+    else if (L) wt = esc(P.loadText(L, UNITS) || "");
+    if (g.build) wt = `build to a heavy ${g.reps === 1 ? "single" : g.reps === 2 ? "double" : g.reps === 3 ? "triple" : g.reps + "-rep set"}`;
+    for (let i = 0; i < (g.sets || 1); i++) rows.push(`<div class="ssr"><span class="sub num">Set ${++n}</span><span>${reps}${g.per ? " each " + esc(g.per) : ""}</span><span>${wt}</span></div>`);
+  }
+  const wu = b && (b.warmupSets || (b.warmup && !/^\s*(none|no|off|skip)\s*$/i.test(b.warmup))) && top ? P.warmupPlan({ work: top, bar: BAR, max, step: 5, def: db.warmupDefault, custom: b.warmup }) : [];
+  const head = r.errors.length || r.loose ? `<div class="sub">Shown to the client as written. Rows below are what the app sets up to log.</div>` : "";
+  return `<div class="ss">${head}${wu.length ? `<div class="ssr wu"><span class="sub">Warm-up</span><span class="num">${esc(wu.map((x) => `${x.w}×${x.r}`).join(", "))}</span><span class="sub">${BAR} lb bar</span></div>` : ""}${rows.join("") || `<div class="sub">Logs 1 set.</div>`}${missingMax ? `<div class="flagtxt">Add their max for this lift (Maxes, on their page) so the app can work out the weight.</div>` : ""}</div>`;
+}
+function sessionHTML(drag) {
+  const [pid, ws, did] = drag.split("|"), w = +ws, p = prog(pid), day = p && p.days.find((x) => x.id === did); if (!day) return "";
+  const c = client(p.clientId), cday = (P.compile(p).weeks[w] || { days: [] }).days.find((x) => x.id === did), date = cday && cday.date;
+  const labels = groupLabels(day.blocks);
+  const rows = day.blocks.map((b, bi) => {
+    const cell = (b.weeks || [])[w] || "", m = exMeta(b.ex), lab = labels[bi];
+    return `<div class="sess-ex${cell.trim() ? "" : " off"}"><div class="row"><b class="grow">${lab ? `<span class="glabel">${esc(lab.label)}</span> ` : ""}${esc(m.name)}</b>${b.rest ? `<span class="sub">rest ${mmss(b.rest)}</span>` : ""}</div>
+      <input class="in" data-sess="${bi}" value="${esc(cell)}" placeholder="e.g. 3x5 @80% · 4x8 @135 · 3x10 @RPE8 · blank = not this day">
+      <div id="ss-${bi}">${setsFor(cell, b.ex, c, b, p)}</div></div>`;
+  }).join("");
+  return `<div class="row"><div class="grow"><div class="eyebrow">${esc(c ? c.name : "")}${date ? " · " + esc(dateLabel(date)) : ""}</div><h2>Week ${w + 1} · ${esc(day.name || "Workout")}</h2></div><button class="btn small ghost" data-act="modal-close">Done</button></div>
+    <p class="sub">What ${esc(c ? c.name : "the client")} will see, with weights worked out from their maxes. Change any line and it updates for <b>this day only</b> (week ${w + 1} of “${esc(p.name)}”). Changes save as you type.</p>
+    ${day.note ? `<div class="cnote">${P.richText(day.note)}</div>` : ""}${day.warmup ? `<div class="cnote"><b>Warm-up:</b> ${P.richText(day.warmup)}</div>` : ""}
+    <div class="sess">${rows}</div>
+    ${day.cooldown ? `<div class="cnote"><b>Cool-down:</b> ${P.richText(day.cooldown)}</div>` : ""}
+    <div class="row sess-foot"><label class="f">Date<input class="in" type="date" id="mv-date" value="${date || ""}" data-drag="${esc(drag)}"></label><button class="btn" data-act="mv-save">Move to this date</button><button class="btn danger" data-act="mv-off">Remove from calendar</button><span class="grow"></span><a class="btn small ghost" href="#program-${p.id}" data-act="sess-prog" data-d="${p.days.indexOf(day)}" data-w="${w}" style="text-decoration:none">Open the whole program</a></div>`;
 }
 function fixDatedStart(pr) { const ds = Object.values(pr.moves || {}).filter((v) => /^\d{4}-\d{2}-\d{2}$/.test(v)).sort(); if (ds.length) pr.startDate = ds[0]; }
 // Take one session off a client's calendar (and out of their app). Logged workouts are never touched.
@@ -906,6 +947,9 @@ document.addEventListener("click", (ev) => {
       removedProg = db.programs[i]; db.programs.splice(i, 1); UI.confirm = null; save(); route();
       toast(`Removed “${removedProg.name}”.`, { act: "prog-restore", label: "Undo" }); break; }
     case "prog-restore": if (removedProg) { db.programs.push(removedProg); removedProg = null; save(); route(); $("#toast").hidden = true; } break;
+    case "wk-open": UI.sess = t.dataset.drag; openModal(`<div id="sess-box">${sessionHTML(t.dataset.drag)}</div>`); break;
+    case "sess-prog": UI.day = +t.dataset.d; UI.previewWeek = +t.dataset.w; closeModal(); break;
+    case "log-open": { const l = db.logs.find((x) => x.id === t.dataset.l); if (l) openModal(`<div class="row"><h2 class="grow">Logged workout</h2><button class="btn small ghost" data-act="modal-close">Close</button></div>${logCardHTML(l)}`); break; }
     case "wk-move": { const [pid, w, did] = t.dataset.drag.split("|"), pr = prog(pid); if (!pr) break;
       const dd = pr.days.find((x) => x.id === did); if (!dd) break;
       const cur = P.movedDate(pr, +w, dd) || P.dayDate(pr, +w, dd);
@@ -981,6 +1025,12 @@ document.addEventListener("input", (ev) => {
     t.parentElement.querySelector(".pv").outerHTML = cellPreview(t.value, b.ex, p);
     t.parentElement.classList.toggle("off", !t.value.trim());
     return;
+  }
+  if (t.dataset.sess != null && UI.sess) { // edit one exercise for one scheduled day
+    const [pid, ws, did] = UI.sess.split("|"), p2 = prog(pid), day2 = p2 && p2.days.find((x) => x.id === did), b = day2 && day2.blocks[+t.dataset.sess]; if (!b) return;
+    b.weeks = b.weeks || []; while (b.weeks.length < p2.weeks) b.weeks.push(""); b.weeks[+ws] = t.value; save();
+    const box = $("#ss-" + t.dataset.sess); if (box) box.innerHTML = setsFor(t.value, b.ex, client(p2.clientId), b, p2);
+    t.closest(".sess-ex").classList.toggle("off", !t.value.trim()); return;
   }
   if (t.id === "ex-q") { UI.exQ = t.value; $("#ex-list").innerHTML = exListHTML(); return; }
   if (t.id === "pick-q" && UI.picker) { UI.picker.q = t.value; $("#pick-list").innerHTML = pickerHTML(t.value); return; }

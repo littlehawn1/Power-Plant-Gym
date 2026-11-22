@@ -208,3 +208,13 @@ table.maxt { width: 100%; border-collapse: collapse; font-size: 14px; }
 .cw-x { position: absolute; top: 2px; right: 2px; border: 0; background: none; color: inherit; opacity: .45; font-size: 15px; line-height: 1; padding: 2px 4px; cursor: pointer; border-radius: 4px; }
 .cw-x:hover, .cw-x:focus-visible { opacity: 1; background: var(--sunken); color: var(--bad); }
 .cw.drag b { padding-right: 14px; }
+
+/* One scheduled workout */
+.sess { display: flex; flex-direction: column; gap: 12px; margin: 10px 0; }
+.sess-ex { border: 1px solid var(--line); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+.sess-ex.off { opacity: .6; }
+.ss { display: flex; flex-direction: column; gap: 2px; }
+.ssr { display: grid; grid-template-columns: 70px minmax(0, 1fr) minmax(0, 1.4fr); gap: 8px; font-size: 14px; padding: 2px 0; }
+.ssr.wu { border-bottom: 1px dashed var(--line); padding-bottom: 4px; margin-bottom: 2px; }
+.flagtxt { color: var(--bad); font-size: 13px; }
+.sess-foot { align-items: flex-end; flex-wrap: wrap; gap: 8px; border-top: 1px solid var(--line); padding-top: 10px; }
