@@ -1,4 +1,4 @@
--- Power Plant Gym: owner level for coaches
+-- Power Plant Gym update: owner level for coaches, and archiving clients
 -- Paste into Supabase → SQL Editor → New query, change the two emails marked  >>> OWNERS <<<  and click Run.
 -- Safe to run again.
 --
@@ -28,6 +28,10 @@ create policy "coaches read coach list" on public.coach_emails for select using 
 create policy "owners add coaches" on public.coach_emails for insert with check (public.is_owner());
 create policy "owners change coaches" on public.coach_emails for update using (public.is_owner()) with check (public.is_owner());
 create policy "owners remove coaches" on public.coach_emails for delete using (public.is_owner());
+
+-- Archiving: a client who has left can be archived. Nothing is deleted; they just drop out of the coaches' list.
+alter table public.profiles add column if not exists archived boolean not null default false;
+grant update (name, units, coach_id, remote, archived) on public.profiles to authenticated;
 
 -- >>> OWNERS <<<  Put the owners' login emails here (lowercase). They must already be on the coach list or are added.
 insert into public.coach_emails (email, is_owner) values

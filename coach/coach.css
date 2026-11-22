@@ -233,3 +233,4 @@ table.maxt { width: 100%; border-collapse: collapse; font-size: 14px; }
 .ssr.ed .in.wide { width: 6.5em; }
 .pill.good { background: rgba(46,139,87,.18); color: #2e7d4f; }
 @media (prefers-color-scheme: dark) { .pill.good { color: #6fcf97; } }
+.ccard.archived { opacity: .75; }

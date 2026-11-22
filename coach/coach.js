@@ -64,8 +64,10 @@ const Cloud = window.PPCloud;
 let meUser = null, snap = null, pushing = false, pushAgain = false, pushFailed = false, loadedAt = 0;
 async function loadCloud() {
   const c = Cloud.client(), q = (t, cols) => c.from(t).select(cols);
+  let noArchive = false;
+  const profs = async () => { const r = await q("profiles", "id,role,name,email,coach_id,remote,archived,created_at").order("created_at"); if (!r.error) return r; noArchive = true; return q("profiles", "id,role,name,email,coach_id,remote,created_at").order("created_at"); }; // before the archive update is run
   const [pf, cn, mx, pr, wo, dn, gs] = await Promise.all([
-    q("profiles", "id,role,name,email,coach_id,remote,created_at").order("created_at"),
+    profs(),
     q("client_notes", "client_id,note"),
     q("client_maxes", "client_id,ex,rm5,rm1,target,pending"),
     q("programs", "id,client_id,name,data,updated_at"),
@@ -74,11 +76,11 @@ async function loadCloud() {
     q("gym_settings", "key,data"),
   ]);
   const bad = [pf, cn, mx, pr, wo, dn, gs].find((r) => r.error); if (bad) throw bad.error;
-  const d = { v: 2, sample: false, cloud: true, me: meUser.id, coaches: [], clients: [], programs: [], logs: [], custom: {}, dayNotes: {} };
+  const d = { noArchive: undefined, v: 2, sample: false, cloud: true, me: meUser.id, coaches: [], clients: [], programs: [], logs: [], custom: {}, dayNotes: {} };
   for (const p of pf.data) {
     const name = p.name || p.email || "Unnamed";
     if (p.role === "coach") { d.coaches.push({ id: p.id, name }); (d.coachProfiles = d.coachProfiles || []).push({ email: String(p.email || "").toLowerCase(), name: p.name || "" }); }
-    else d.clients.push({ id: p.id, name, email: p.email, coachId: p.coach_id, remote: !!p.remote, notes: "", maxes: {} });
+    else d.clients.push({ id: p.id, name, email: p.email, coachId: p.coach_id, remote: !!p.remote, archived: !!p.archived, notes: "", maxes: {} });
   }
   const cl = (id) => d.clients.find((x) => x.id === id);
   for (const n of cn.data) { const k = cl(n.client_id); if (k) k.notes = n.note || ""; }
@@ -89,6 +91,7 @@ async function loadCloud() {
   for (const n of dn.data) (d.dayNotes[n.client_id] = d.dayNotes[n.client_id] || {})[n.day] = n.note;
   const s = (gs.data.find((x) => x.key === "coach") || {}).data || {};
   d.custom = s.custom || {}; if (s.maxTemplates) d.maxTemplates = s.maxTemplates; if (s.warmupDefault) d.warmupDefault = s.warmupDefault; if (s.qMarked) d.qMarked = true;
+  d.noArchive = noArchive;
   migrate(d);
   return d;
 }
@@ -96,7 +99,7 @@ async function loadCloud() {
 function rowsOf(d) {
   const out = { prof: {}, note: {}, max: {}, prog: {}, day: {}, set: {} };
   for (const c of d.clients) {
-    out.prof[c.id] = { coach_id: c.coachId || null, remote: !!c.remote };
+    out.prof[c.id] = { coach_id: c.coachId || null, remote: !!c.remote, ...(d.noArchive ? {} : { archived: !!c.archived }) };
     out.note[c.id] = { client_id: c.id, note: c.notes || "" };
     for (const [ex, m] of Object.entries(c.maxes || {})) out.max[c.id + "|" + ex] = { client_id: c.id, ex, rm5: m.rm5 ?? null, rm1: m.rm1 ?? null, target: m.target ?? null, pending: m.pending || null };
   }
@@ -312,16 +315,18 @@ function renderTop() {
 
 function renderClients() {
   setNav("clients");
-  const rows = db.clients.map((c) => {
+  const arch = db.clients.filter((c) => c.archived), shown = db.clients.filter((c) => UI.showArchived ? c.archived : !c.archived);
+  const rows = shown.map((c) => {
     const ps = programsOf(c.id), cur = ps[ps.length - 1], last = logsOf(c.id)[0], pend = Object.values(c.maxes || {}).some((m) => m.pending), lf = last ? logFlags(last) : null;
     const coach = db.coaches.find((x) => x.id === c.coachId);
-    return `<a class="panel ccard" href="#client-${c.id}"><b>${esc(c.name)}</b>
+    return `<a class="panel ccard${c.archived ? " archived" : ""}" href="#client-${c.id}"><b>${esc(c.name)}</b>${c.archived ? ` <span class="pill">Archived</span>` : ""}
       <span class="sub">${coach ? "Coach: " + esc(coach.name) : ""}${c.remote ? " · Remote" : " · In person"}</span>
       <span>${cur ? `${esc(cur.name)} · <span class="sub">${esc(programWeekNow(cur) || "")}</span>` : `<span class="sub">No program yet</span>`}</span>
       <span class="sub">${last ? `Last workout ${dateLabel(last.date)}: ${esc(last.name)}` : "No workouts logged yet"}</span>
       ${pend || (lf && lf.any) ? `<span class="flags">${pend ? `<span class="flag pr">Target max to review</span>` : ""}${lf && lf.pain.length ? `<span class="flag pain">Pain noted</span>` : ""}${lf && lf.missed.length ? `<span class="flag miss">Missed reps</span>` : ""}</span>` : ""}</a>`;
   }).join("");
-  $("#view").innerHTML = `<div class="row"><div class="grow"><div class="eyebrow">${db.clients.length} clients · everyone’s clients are visible to every coach</div><h1>Clients</h1></div>
+  $("#view").innerHTML = `<div class="row"><div class="grow"><div class="eyebrow">${db.clients.length - arch.length} active clients · everyone’s clients are visible to every coach</div><h1>${UI.showArchived ? "Archived clients" : "Clients"}</h1></div>
+      ${arch.length || UI.showArchived ? `<button class="btn small ghost" data-act="show-archived">${UI.showArchived ? "← Active clients" : `Archived (${arch.length})`}</button>` : ""}
       <button class="btn primary" data-act="client-new">+ Add client</button></div>
     ${UI.confirm === "client-new" && db.cloud ? `<section class="panel"><h2>Add a client</h2>
         <p>Clients make their own account in the app, so their workouts save to them. Send them this link and have them tap <b>Create an account</b> with their email:</p>
@@ -450,7 +455,9 @@ function renderClient(cid) {
     <div class="row"><div class="grow">${db.cloud
       ? `<div class="row"><label class="eyebrow">Main coach <select class="in" id="c-coach" data-c="${cid}"><option value="">–</option>${db.coaches.map((x) => `<option value="${x.id}" ${x.id === c.coachId ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>
           <select class="in" id="c-remote" data-c="${cid}" aria-label="Training"><option value="0">In person</option><option value="1" ${c.remote ? "selected" : ""}>Remote</option></select><span class="sub">${esc(c.email || "")}</span></div>`
-      : `<div class="eyebrow">${c.remote ? "Remote" : "In person"} · Main coach: ${esc((db.coaches.find((x) => x.id === c.coachId) || {}).name || "–")}</div>`}<h1>${esc(c.name)}</h1></div></div>
+      : `<div class="eyebrow">${c.remote ? "Remote" : "In person"} · Main coach: ${esc((db.coaches.find((x) => x.id === c.coachId) || {}).name || "–")}</div>`}<h1>${esc(c.name)}${c.archived ? ` <span class="pill">Archived</span>` : ""}</h1></div>
+      ${c.archived ? `<button class="btn small" data-act="client-unarchive" data-c="${cid}">Bring back</button>` : UI.confirm === "archive:" + cid ? `<span class="sub">Archive ${esc(c.name)}? They leave the Clients list; their workouts, programs and maxes are kept.</span><button class="btn small danger" data-act="client-archive-yes" data-c="${cid}">Archive</button><button class="btn small ghost" data-act="cancel">Cancel</button>` : `<button class="btn small ghost" data-act="client-archive" data-c="${cid}">Archive client</button>`}</div>
+    ${c.archived ? `<div class="panel" style="background:var(--sunken)">${esc(c.name)} is archived: hidden from the Clients list, everything kept. <b>Bring back</b> puts them back in the list.</div>` : ""}
     <div class="cols">
       <section class="feed"><div class="row"><button class="btn small primary" data-act="sched-open" data-c="${cid}">+ Add workouts to calendar</button><button class="btn small" data-act="preview-app" data-c="${cid}" title="Open their app as they see it, in a new tab">See their app</button><div class="seg" role="tablist"><button role="tab" data-act="ctab" data-t="calendar" aria-selected="${tab === "calendar"}">Calendar</button><button role="tab" data-act="ctab" data-t="feed" aria-selected="${tab === "feed"}">Recent workouts</button>${db.cloud ? `<button role="tab" data-act="ctab" data-t="messages" aria-selected="${tab === "messages"}">Messages${unreadOf(cid) ? `<span class="nbadge">${unreadOf(cid)}</span>` : ""}</button>` : ""}</div></div>
         ${tab === "messages" && db.cloud ? conversationHTML(cid) : tab === "calendar" ? calendarHTML(c) : logs.map((l) => logCardHTML(l)).join("") || `<div class="empty">${db.cloud ? `No workouts logged yet. Every workout ${esc(c.name)} finishes in the app shows up here with their notes.` : `No workouts logged yet. Once accounts are live, every workout ${esc(c.name)} finishes shows up here with their notes. Until then, load the file they send from the app (Profile → Send my workouts to my coach).`}</div>`}</section>
@@ -1048,6 +1055,13 @@ document.addEventListener("click", (ev) => {
     case "coach-rm-no": UI.confirm = null; loadCoachList(); break;
     case "coach-rm-yes": coachListChange(t.dataset.e, false); break;
     case "coach-owner": coachOwner(t.dataset.e, t.dataset.v === "1"); break;
+    case "show-archived": UI.showArchived = !UI.showArchived; route(); break;
+    case "client-archive": UI.confirm = "archive:" + t.dataset.c; route(); break;
+    case "client-archive-yes": case "client-unarchive": {
+      if (db.cloud && db.noArchive) { toast("Archiving needs the database update first: run supabase/update-owners-archive.sql in Supabase’s SQL Editor."); UI.confirm = null; route(); break; }
+      const c = client(t.dataset.c); c.archived = a === "client-archive-yes"; UI.confirm = null; save();
+      if (c.archived) { UI.showArchived = false; location.hash = "#clients"; toast(`${c.name} archived. Find them under Archived on the Clients page.`); } else { UI.showArchived = false; route(); toast(`${c.name} is back in the Clients list.`); }
+      break; }
     case "sched-open": schedOpen(t.dataset.c, t.dataset.src); break;
     case "sc-day": { const k = t.dataset.k; if (t.checked) UI.sched.sel.add(k); else UI.sched.sel.delete(k); schedRedraw(); break; }
     case "sc-week": { const w = +t.dataset.w, p2 = prog(UI.sched.src); for (const day of p2.days) if (hasWorkout(p2, w, day)) { const k = w + ":" + day.id; if (t.checked) UI.sched.sel.add(k); else UI.sched.sel.delete(k); } schedRedraw(); break; }

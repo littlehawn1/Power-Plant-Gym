@@ -28,6 +28,7 @@ create table if not exists public.profiles (
   created_at  timestamptz not null default now()
 );
 alter table public.profiles add column if not exists remote boolean not null default false;  -- for databases set up before it existed
+alter table public.profiles add column if not exists archived boolean not null default false; -- a client who has left (kept, just hidden)
 
 -- Is the person making this request a coach? (used by every policy below)
 create or replace function public.is_coach() returns boolean
@@ -192,7 +193,7 @@ create policy "edit own profile" on public.profiles for update
   using (id = auth.uid() or public.is_coach()) with check (id = auth.uid() or public.is_coach());
 -- Nobody can make themselves a coach by editing their profile: role changes only via the coach list.
 revoke update on public.profiles from authenticated, anon;
-grant update (name, units, coach_id, remote) on public.profiles to authenticated;
+grant update (name, units, coach_id, remote, archived) on public.profiles to authenticated;
 
 -- programs: coaches do everything; a client reads their own
 drop policy if exists "coaches manage programs" on public.programs;
