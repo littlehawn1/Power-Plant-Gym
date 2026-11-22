@@ -44,6 +44,12 @@
     s = String(s || "").trim().replace(/[.]$/, "");
     if (!s) return null;
     let m;
+    // A range: "185-205", "70-75%", "70%-75%", "RPE 7-8" → the low value plus vMax.
+    if ((m = s.match(/^(rpe\s*)?(\d+(?:\.\d+)?)\s*(%?)\s*(?:-|–|to)\s*(\d+(?:\.\d+)?)\s*(%?)\s*(lb|lbs|kg)?$/i)) && +m[4] > +m[2]) {
+      if (m[1]) return { t: "rpe", v: num(m[2]), vMax: num(m[4]) };
+      if (m[3] || m[5]) return { t: "pct", v: num(m[2]), vMax: num(m[4]) };
+      return { t: m[6] && m[6].toLowerCase() === "kg" ? "kg" : "lb", v: num(m[2]), vMax: num(m[4]) };
+    }
     if ((m = s.match(/^(\d+(?:\.\d+)?)\s*%\s*(?:of\s+)?(?:today'?s\s+|todays\s+)?(?:top|heaviest)(?:\s*(?:set|wt|weight|single|double|triple|of the day))?$/i))) return { t: "top", v: num(m[1]) };
     if ((m = s.match(/^(\d+(?:\.\d+)?)\s*%\s*(?:of\s+)?(?:(?:your|the)\s+)?(?:(?:est(?:imated)?\.?|target|training|tm)\s*)?(?:1\s*rm|e1rm|max)?$/i))) return { t: "pct", v: num(m[1]) };
     if ((m = s.match(/^rpe\s*(\d+(?:\.\d+)?)$/i))) return { t: "rpe", v: num(m[1]) };
@@ -105,11 +111,12 @@
   const mmss = (s) => { s = Math.round(s || 0); const m = Math.floor(s / 60), r = s % 60; return m ? `${m}:${String(r).padStart(2, "0")}` : `${r}s`; };
   function loadText(l, units) {
     if (!l) return "";
-    if (l.t === "pct") return `${l.v}%`;
+    const r = (x) => (l.vMax ? `${x}–${l.vMax}` : `${x}`);
+    if (l.t === "pct") return `${r(l.v)}%`;
     if (l.t === "top") return `${l.v}% of today’s top set`;
-    if (l.t === "rpe") return `RPE ${l.v}`;
+    if (l.t === "rpe") return `RPE ${r(l.v)}`;
     if (l.t === "rir") return `${l.v} RIR`;
-    if (l.t === "lb" || l.t === "kg") return `${l.v} ${l.t}`;
+    if (l.t === "lb" || l.t === "kg") return `${r(l.v)} ${l.t}`;
     if (l.t === "bw") return "bodyweight";
     return "";
   }

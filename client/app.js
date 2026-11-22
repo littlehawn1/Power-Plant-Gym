@@ -640,10 +640,10 @@ function rxText(it, grouped) {
   if (it.groups) {
     const u = S.state.units;
     if (it.text) { // the coach's own words, plus the weights worked out from any percentages in them
-      const hints = it.groups.filter((g) => g.load && g.load.t === "pct").map((g) => { const w = pctWeight(it.ex, g.load.v); return w ? `${g.load.v}% ≈ ${fmt(w)} ${u}` : ""; }).filter(Boolean);
+      const hints = it.groups.filter((g) => g.load && g.load.t === "pct").map((g) => { const w = pctWeight(it.ex, g.load.v), w2 = g.load.vMax ? pctWeight(it.ex, g.load.vMax) : 0; return w ? `${g.load.v}${g.load.vMax ? "–" + g.load.vMax : ""}% ≈ ${fmt(w)}${w2 ? "–" + fmt(w2) : ""} ${u}` : ""; }).filter(Boolean);
       return [it.text, hints.length ? `(${hints.join(", ")})` : "", it.format ? PP.formatText(it.format) : "", it.rest && !grouped ? `rest ${mmss(it.rest)}` : ""].filter(Boolean).join(" · ");
     }
-    const parts = it.groups.map((g) => { let t = window.PPProgram.groupText(g); if (g.load && g.load.t === "pct") { const w = pctWeight(it.ex, g.load.v); if (w) t += ` ≈ ${fmt(w)} ${u}`; } return t; });
+    const parts = it.groups.map((g) => { let t = window.PPProgram.groupText(g); if (g.load && g.load.t === "pct") { const w = pctWeight(it.ex, g.load.v), w2 = g.load.vMax ? pctWeight(it.ex, g.load.vMax) : 0; if (w) t += ` ≈ ${fmt(w)}${w2 ? "–" + fmt(w2) : ""} ${u}`; } return t; });
     if (it.tempo) parts.push(`tempo ${it.tempo}`); if (it.pause) parts.push(`pause ${it.pause}`);
     if (it.format) parts.push(window.PPProgram.formatText(it.format));
     if (it.rest && !grouped) parts.push(`rest ${mmss(it.rest)}`);
@@ -652,9 +652,10 @@ function rxText(it, grouped) {
   const e = getEx(it.ex), u = S.state.units, L = it.load || { t: "none" };
   let base = it.time ? `${it.sets} × ${mmss(it.time)}` : it.dist ? `${it.sets} × ${fmt(it.dist)} ${distUnit(e)}` : `${it.sets} × ${it.reps}${it.repsMax && it.repsMax !== it.reps ? "–" + it.repsMax : ""}`;
   let load = "";
-  if (L.t === "lb") load = `${fmt(L.v)} ${u}${e.kind === "dumbbell" ? " each" : ""}`;
-  else if (L.t === "pct") { const m = maxFor(it.ex); load = `${fmt(L.v)}% of max${m ? ` ≈ ${fmt(rxLoadWeight(it))} ${u}` : ""}`; }
-  else if (L.t === "rpe") load = `RPE ${fmt(L.v)}`;
+  const hi = L.vMax ? "–" + fmt(L.vMax) : "";
+  if (L.t === "lb") load = `${fmt(L.v)}${hi} ${u}${e.kind === "dumbbell" ? " each" : ""}`;
+  else if (L.t === "pct") { const m = maxFor(it.ex), w2 = L.vMax && m ? pctWeight(it.ex, L.vMax) : 0; load = `${fmt(L.v)}${hi}% of max${m ? ` ≈ ${fmt(rxLoadWeight(it))}${w2 ? "–" + fmt(w2) : ""} ${u}` : ""}`; }
+  else if (L.t === "rpe") load = `RPE ${fmt(L.v)}${hi}`;
   return [base, load, it.rest && !grouped ? `rest ${mmss(it.rest)}` : ""].filter(Boolean).join(" · ");
 }
 function rxEntry(it) {

@@ -230,3 +230,4 @@ table.maxt { width: 100%; border-collapse: collapse; font-size: 14px; }
 .sess-more { margin-top: 10px; border: 1px dashed var(--line); border-radius: 8px; padding: 8px 10px; }
 .sess-more summary { cursor: pointer; color: var(--muted, inherit); font-size: 14px; }
 .sess-more[open] summary { margin-bottom: 8px; }
+.ssr.ed .in.wide { width: 6.5em; }

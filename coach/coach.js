@@ -775,7 +775,8 @@ function moveSession(drag, date) {
 /* ---- One scheduled workout: the exact sets and weights this client will get, editable for that day ---- */
 const BAR = 45;
 // Text for one load or rep target, written the way the program cells are typed (so it reads back the same).
-const loadTok = (L) => !L ? "" : L.t === "pct" ? `${L.v}%` : L.t === "lb" ? `${L.v}` : L.t === "kg" ? `${L.v} kg` : L.t === "top" ? `${L.v}% of todays top` : L.t === "rpe" ? `RPE ${L.v}` : L.t === "rir" ? `RIR ${L.v}` : L.t === "bw" ? "bw" : "";
+const loadTok = (L) => { if (!L) return ""; const v = L.vMax ? `${L.v}-${L.vMax}` : `${L.v}`; return L.t === "pct" ? `${v}%` : L.t === "lb" ? v : L.t === "kg" ? `${v} kg` : L.t === "top" ? `${L.v}% of todays top` : L.t === "rpe" ? `RPE ${v}` : loadTok2(L); };
+const loadTok2 = (L) => L.t === "rir" ? `RIR ${L.v}` : L.t === "bw" ? "bw" : "";
 const repTok = (g) => (g.amrap && !g.reps ? "AMRAP" : g.amrap ? `${g.reps}+` : g.repsMax ? `${g.reps}-${g.repsMax}` : `${g.reps}`) + (g.per ? `/${g.per}` : "");
 const SKIPC = /^(skip|off|none|n\/a|-+|—)$/i, NOWU = /^\s*(none|no|off|skip)\s*$/i;
 // One exercise in a scheduled workout: the warm-up and every working set, each with editable reps and weight.
@@ -792,10 +793,11 @@ function setsFor(text, ex, c, b, p, bi) {
   for (const g of r.groups) {
     const reps = g.capped ? `AMRAP in ${mmss(g.time)}` : g.time ? mmss(g.time) : g.dist ? `${g.dist} ${g.distUnit || ""}` : g.amrap ? (g.reps ? `${g.reps}+ reps` : "as many reps as possible") : `${g.reps}${g.repsMax ? "–" + g.repsMax : ""} rep${g.reps === 1 && !g.repsMax ? "" : "s"}`;
     let wt = "", calc = "", hint = "", L = g.load;
-    if (L && L.t === "pct") { if (max) { const x = P.pctOf(max, L.v, UNITS); calc = x; wt = `<b>${x} lb</b> <span class="sub">(${L.v}% of ${max})</span>`; hint = `${L.v}% of ${max}`; top = Math.max(top, x); } else { wt = `${L.v}% <span class="flagtxt">— no max set</span>`; hint = `${L.v}% · no max`; missingMax = true; } }
-    else if (L && (L.t === "lb" || L.t === "kg")) { calc = L.v; wt = `<b>${L.v} ${L.t}</b>`; top = Math.max(top, L.t === "lb" ? L.v : 0); hint = max && L.t === "lb" ? `${Math.round((L.v / max) * 100)}% of ${max}` : ""; }
+    const pv = L && L.vMax ? `${L.v}–${L.vMax}` : L ? `${L.v}` : "";
+    if (L && L.t === "pct") { if (max) { const x = P.pctOf(max, L.v, UNITS), x2 = L.vMax ? P.pctOf(max, L.vMax, UNITS) : 0; calc = x2 ? `${x}-${x2}` : x; wt = `<b>${x}${x2 ? "–" + x2 : ""} lb</b> <span class="sub">(${pv}% of ${max})</span>`; hint = `${pv}% of ${max}`; top = Math.max(top, x); } else { wt = `${pv}% <span class="flagtxt">— no max set</span>`; hint = `${pv}% · no max`; missingMax = true; } }
+    else if (L && (L.t === "lb" || L.t === "kg")) { calc = L.vMax ? `${L.v}-${L.vMax}` : L.v; wt = `<b>${pv} ${L.t}</b>`; top = Math.max(top, L.t === "lb" ? L.v : 0); hint = max && L.t === "lb" ? `${Math.round((L.v / max) * 100)}${L.vMax ? "–" + Math.round((L.vMax / max) * 100) : ""}% of ${max}` : ""; }
     else if (L && L.t === "top") { wt = `${L.v}% of the day’s top set`; hint = wt; }
-    else if (L && L.t === "rpe") { wt = `RPE ${L.v}`; hint = wt; }
+    else if (L && L.t === "rpe") { wt = `RPE ${pv}`; hint = wt; }
     else if (L && L.t === "bw") { wt = "bodyweight"; hint = wt; }
     else if (L) { wt = esc(P.loadText(L, UNITS) || ""); hint = wt; }
     if (g.build) wt = `build to a heavy ${g.reps === 1 ? "single" : g.reps === 2 ? "double" : g.reps === 3 ? "triple" : g.reps + "-rep set"}`;
@@ -804,7 +806,7 @@ function setsFor(text, ex, c, b, p, bi) {
       rows.push(editable
         ? `<div class="ssr ed" data-row="${bi}" data-load="${esc(loadTok(L))}" data-calc="${calc}" data-label="${i === 0 && g.label ? esc(g.label) : ""}"><span class="sub num">Set ${n}</span>
             <span><input class="in num ss-in" data-ss="r" value="${esc(g.reps || g.amrap ? repTok(g) : "")}" placeholder="reps" aria-label="Set ${n} reps" size="4"> reps</span>
-            <span><input class="in num ss-in" data-ss="w" inputmode="decimal" value="${calc}" placeholder="${esc(L && !calc ? (L.t === "rpe" ? "RPE " + L.v : L.t === "top" ? L.v + "% top" : L.t === "pct" ? L.v + "%" : "") : "weight")}" aria-label="Set ${n} weight" size="5"> lb ${hint ? `<span class="sub">${esc(hint)}</span>` : ""}${i === 0 && g.label ? ` <span class="sub">(${esc(g.label)})</span>` : ""}</span>
+            <span><input class="in num ss-in wide" data-ss="w" value="${calc}" placeholder="${esc(L && !calc ? (L.t === "rpe" ? "RPE " + pv : L.t === "top" ? L.v + "% top" : L.t === "pct" ? L.v + "%" : "") : "weight")}" aria-label="Set ${n} weight" size="5"> lb ${hint ? `<span class="sub">${esc(hint)}</span>` : ""}${i === 0 && g.label ? ` <span class="sub">(${esc(g.label)})</span>` : ""}</span>
             <button class="icon ss-x" data-act="ss-del" title="Remove this set" aria-label="Remove set ${n}">×</button></div>`
         : `<div class="ssr"><span class="sub num">Set ${n}</span><span>${reps}${g.per ? " each " + esc(g.per) : ""}</span><span>${wt}</span></div>`);
     }
@@ -822,7 +824,7 @@ function setsFor(text, ex, c, b, p, bi) {
   }
   const head = asText && editable ? `<div class="sub">The client reads your text above as written.${rowsTxt ? ` These sets are what their app logs for this day <button class="btn small ghost" data-act="ss-reset" data-row="${bi}">Use the sets from the text</button>` : " Below is what their app sets up to log; change any number, or remove sets that aren’t working sets."}</div>`
     : asText ? `<div class="sub">Shown to the client as written. Change the line above to change these.</div>`
-    : editable ? `<div class="sub">Change any set’s reps or weight. A weight you type replaces the % for that set${max ? "; the % of their max shows beside it" : ""}.</div>` : "";
+    : editable ? `<div class="sub">Change any set’s reps or weight; a range works for either (5-7 reps, 185-205 lb). A weight you type replaces the % for that set${max ? "; the % of their max shows beside it" : ""}.</div>` : "";
   return `<div class="ss">${head}${wuHTML}<div class="ss-work">${rows.join("") || `<div class="sub">Logs 1 set.</div>`}${editable ? `<button class="btn small ghost" data-act="ss-add" data-row="${bi}">+ Set</button>` : ""}</div>${missingMax ? `<div class="flagtxt">Add their max for this lift (Maxes, on their page) so the app can work out the weight.</div>` : ""}</div>`;
 }
 // Turn the edited set rows back into a line, e.g. "1x3 @ 200 (top set), 3x4 @ 75%, tempo 3010".
@@ -831,7 +833,9 @@ function rowsToLine(bi, oldText) {
   for (const row of document.querySelectorAll(`.ssr.ed[data-row="${bi}"]`)) {
     const rIn = row.querySelector('[data-ss="r"]').value.trim(), wIn = row.querySelector('[data-ss="w"]').value.trim();
     const reps = /^(\d+(\+|\s*-\s*\d+)?|amrap)(\/\w+)?$/i.test(rIn) ? rIn.replace(/\s+/g, "") : "1";
-    const load = wIn && isFinite(+wIn) && +wIn > 0 && String(+wIn) !== row.dataset.calc ? String(+wIn) : row.dataset.load; // blank or unchanged keeps the program's %, RPE…
+    const wr = wIn.replace(/\s+/g, "").replace(/–/g, "-"), mr = wr.match(/^(\d+(?:\.\d+)?)(?:-(\d+(?:\.\d+)?))?$/);
+    const typed = mr && +mr[1] > 0 ? (mr[2] && +mr[2] > +mr[1] ? `${+mr[1]}-${+mr[2]}` : String(+mr[1])) : "";
+    const load = typed && typed !== String(row.dataset.calc).replace(/\s+/g, "") ? typed : row.dataset.load; // blank or unchanged keeps the program's %, RPE…
     const last = parts[parts.length - 1], label = row.dataset.label;
     if (last && last.reps === reps && last.load === load && !label) last.n++;
     else parts.push({ n: 1, reps, load, label });
