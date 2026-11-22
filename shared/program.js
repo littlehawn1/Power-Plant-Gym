@@ -279,8 +279,8 @@
     const fit = (w) => { if (!(work > 0)) return w; let x = ceilTo(w, step); if (x >= work) x = Math.floor(w / step + 1e-9) * step; return x; };
     const out = [], seen = new Set();
     const add = (w, r) => { if (!(w >= 0) || (work > 0 && w >= work) || seen.has(w)) return; seen.add(w); out.push({ w, r }); };
-    if (c && c.kind === "list") {
-      for (const st of c.steps) add(st.w === "bar" ? bar : st.w.pct ? fit(work * st.w.pct / 100) : st.w, st.r);
+    if (c && c.kind === "list") { // a list the coach wrote is kept exactly as written (no dropping, no de-duplicating)
+      for (const st of c.steps) { const w = st.w === "bar" ? bar : st.w.pct ? fit(work * st.w.pct / 100) : st.w; if (w >= 0) out.push({ w, r: st.r }); }
       return work > 0 || c.steps.every((st) => typeof st.w === "number" || st.w === "bar") ? out : [];
     }
     if (!(work > 0)) return [];

@@ -1112,8 +1112,15 @@ document.addEventListener("click", (ev) => {
       if (last) { const cp = last.cloneNode(true); cp.dataset.label = ""; last.after(cp); } else { const { b } = sessBlock(bi); b.rows = b.rows || []; } sessSaveSets(bi); break; }
     case "ss-reset": { const bi = +t.dataset.row, { w, b } = sessBlock(bi); if (b && b.rows) { b.rows[w] = ""; if (!b.rows.some(Boolean)) delete b.rows; save(); sessRedraw(bi); } break; }
     case "wu-del": { const row = t.closest(".ssr"), bi = +row.dataset.row; row.remove(); sessSaveWu(bi, wuToLine(bi)); break; }
-    case "wu-add": { const bi = +t.dataset.row, rows = document.querySelectorAll(`.ed-wu[data-row="${bi}"]`), last = rows[rows.length - 1];
-      sessSaveWu(bi, [wuToLine(bi), last ? `${+last.querySelector('[data-wu="w"]').value + 20}x3` : "45x5"].filter((x) => x && x !== "none").join(", ")); break; }
+    case "wu-add": { // add a warm-up in the biggest gap below the working weight, keeping them in order
+      const bi = +t.dataset.row, cur = [...document.querySelectorAll(`.ed-wu[data-row="${bi}"]`)].map((row) => ({ w: +row.querySelector('[data-wu="w"]').value || 0, r: Math.round(+row.querySelector('[data-wu="r"]').value) || 5 }));
+      const work = Math.max(0, ...[...document.querySelectorAll(`.ssr.ed[data-row="${bi}"] [data-ss="w"]`)].map((x) => parseFloat(x.value) || 0));
+      const pts = [BAR, ...cur.map((x) => x.w), ...(work ? [work] : [])].sort((x, y) => x - y); let best = null;
+      for (let k = 1; k < pts.length; k++) { const gap = pts[k] - pts[k - 1]; if (gap >= 10 && (!best || gap > best.gap)) best = { gap, w: Math.ceil((pts[k - 1] + gap / 2) / 5) * 5 }; }
+      const nw = best ? best.w : cur.length ? cur[cur.length - 1].w : BAR, list = [...cur, { w: nw, r: best && work && nw > work * 0.8 ? 2 : 3 }].sort((x, y) => x.w - y.w);
+      sessSaveWu(bi, list.map((x) => `${x.w}x${x.r}`).join(", "));
+      if (!best && cur.length) toast("Added a copy of the last warm-up; change its weight or reps.");
+      break; }
     case "wu-auto": sessSaveWu(+t.dataset.row, null); break;
     case "wk-open": UI.sess = t.dataset.drag; openModal(`<div id="sess-box">${sessionHTML(t.dataset.drag)}</div>`); break;
     case "sess-prog": UI.day = +t.dataset.d; UI.previewWeek = +t.dataset.w; closeModal(); break;
